@@ -58,9 +58,14 @@ jobs:
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
           
+      - name: Rename APK
+        run: |
+          mv app/build/outputs/apk/release/app-release.apk "com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk"
+        
       - name: Upload APK as release artifact
         uses: actions/upload-artifact@v4
         with:
           name: SendSpin-Lite-v${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.build_date }}-$([ "$SIGN_APK" = "true" ] && echo "signed" || echo "unsigned")
-          path: app/build/outputs/apk/release/app-release.apk
+          path: com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk
+          compression-level: 0
           retention-days: 90

@@ -58,6 +58,10 @@ jobs:
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           
+      - name: Rename APK
+        run: |
+          mv app/build/outputs/apk/release/app-release.apk "com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk"
+        
       - name: Generate changelog
         id: changelog
         run: |
@@ -82,7 +86,7 @@ jobs:
           name: SendSpin Lite v${{ steps.version.outputs.version_name }}
           body: ${{ steps.changelog.outputs.body }}
           files: |
-            app/build/outputs/apk/release/app-release.apk
+            com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk
           draft: false
           prerelease: false
         env:
