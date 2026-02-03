@@ -1,0 +1,51 @@
+name: Build APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: gradle
+          
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+        
+      - name: Build APK (Debug)
+        run: ./gradlew assembleDebug
+        
+      - name: Extract version from build.gradle.kts
+        id: version
+        run: |
+          VERSION_NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          VERSION_CODE=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION_NAME (Code: $VERSION_CODE)"
+          
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SendSpin-Lite-${{ steps.version.outputs.version_name }}-build-${{ steps.version.outputs.version_code }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

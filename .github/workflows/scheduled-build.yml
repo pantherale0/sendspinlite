@@ -1,0 +1,66 @@
+name: Build Release on Schedule
+
+on:
+  schedule:
+    # Run at 2 AM UTC daily
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: gradle
+          
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+        
+      - name: Create keystore from secrets
+        env:
+          KEYSTORE_CONTENT: ${{ secrets.KEYSTORE_FILE }}
+        run: |
+          if [ -z "$KEYSTORE_CONTENT" ]; then
+            echo "⚠️  Warning: KEYSTORE_FILE secret not found. Building unsigned APK."
+            echo "SIGN_APK=false" >> $GITHUB_ENV
+          else
+            echo "$KEYSTORE_CONTENT" | base64 -d > keystore.jks
+            echo "SIGN_APK=true" >> $GITHUB_ENV
+          fi
+        
+      - name: Build signed APK
+        env:
+          KEYSTORE_FILE: keystore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+        
+      - name: Extract version from build.gradle.kts
+        id: version
+        run: |
+          VERSION_NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          VERSION_CODE=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)
+          BUILD_DATE=$(date -u +'%Y-%m-%d-%H%M%S')
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+          
+      - name: Upload APK as release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SendSpin-Lite-v${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.build_date }}-$([ "$SIGN_APK" = "true" ] && echo "signed" || echo "unsigned")
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 90
