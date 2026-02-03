@@ -1,0 +1,8 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Minimal theme for a Compose-only app -->
+    <style name="Theme.SendSpinAndroid" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- You can set status/navigation bar colors later if you want -->
+    </style>
+
+</resources>
