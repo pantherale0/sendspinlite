@@ -1,130 +1,172 @@
 # Sendspin Android Player
 
-An Android **Sendspin** client that acts as a synchronized network audio **player** and optional **controller**.
-It connects to a Sendspin-compatible server over WebSocket, receives timestamped PCM or Opus audio frames,
-performs clock synchronisation and jitter buffering, and plays audio in tight sync with other devices.
+A basic Android client for [Sendspin](https://github.com/sendspin) that provides synchronized network audio playback. It connects to a Sendspin-compatible server (e.g., Home Assistant) over WebSocket, receives timestamped PCM or Opus audio frames, performs clock synchronization and jitter buffering, and plays audio in tight sync with other devices.
 
-<img src="ui2.png" alt="UI Screenshot" width="40%">
+This project is specially designed for low memory devices and a local network connection only. Connections via cellular will not be supported. The client is design to offer only a Sendspin player.
 
 ## Features
 
-- **Synchronized audio playback**
-  - Server–client clock alignment with drift estimation
-  - Timestamp-based playout with adjustable real-time offset
-- **Opus and PCM support**
+### Core Playback
+- **Synchronized audio playback across network devices**
+  - Server-client clock alignment with drift estimation and real-time correction
+  - Timestamp-based playout with adjustable real-time offset for fine-tuning sync
+  - RTT-based network latency measurement
+  - Adaptive jitter buffering with late-frame detection and dropping
+  - Startup and restart catch-up logic to prevent buffer deadlock
+
+### Audio Codec Support
+- **Flexible codec configuration**
   - PCM-only mode by default (optimized for local WiFi)
-  - Opus support available via `enableOpusCodec` intent parameter
-  - Opus decoding via Concentus (pure Java)
-  - 16‑bit PCM output using Android `AudioTrack`
-- **Adaptive jitter buffering**
-  - Late-frame detection and dropping
-  - Startup and restart catch-up logic to avoid buffer deadlock
-- **Controller role support**
-  - Play / pause / stop / next / previous
-  - Group volume and mute
-- **Metadata role support**
-- **Artwork role support**
-- **Modern Android UI**
-  - Jetpack Compose UI
-  - Live diagnostics: offset, drift, RTT, buffer depth
-  - Real-time playout offset slider for sync tuning
+  - Opus support available via intent parameter
+  - Opus decoding via Concentus (pure Java library)
+  - Support for 16-bit, 24-bit, and 32-bit PCM output
+  - Configurable sample rates and channel counts
 
-## Architecture Overview
+### Discovery & Connection
+- **Automatic server discovery**
+  - mDNS service discovery (`_sendspin-server._tcp`)
+  - Manual URL entry fallback
+  - Persistence of server URL and connection settings
 
-- **SendspinPcmClient**
-  - WebSocket protocol handling
-  - Audio stream lifecycle
-  - Clock sync, playout scheduling, and control commands
-- **ClockSync**
-  - RTT-based offset estimation
-  - Drift calculation (ppm)
-- **AudioJitterBuffer**
-  - Timestamp-ordered queue
-  - Late-drop and restart recovery logic
-- **OpusDecoder**
-  - Concentus-based Opus → PCM decoding
-- **PcmAudioOutput**
-  - Low-level AudioTrack streaming
-- **PlayerViewModel / MainActivity**
-  - Compose UI state and controls
+### Diagnostics & Tuning
+- **Real-time diagnostics dashboard**
+  - Playout offset and sync drift (ppm)
+  - Network quality and stability assessment
+  - Connection type and RTT latency
+  - Buffer depth and late frame drops
+  - Memory usage monitoring for low-end devices
+  - Detailed stream information and state
 
-## Protocol Notes
-
-- Binary audio frames:
-  - Type `0x04`
-  - 8‑byte **big-endian server timestamp** (µs)
-  - Followed by Opus or PCM payload
-- JSON messages handle:
-  - Handshake (`client/hello`, `server/hello`)
-  - Time sync (`client/time`, `server/time`)
-  - Stream lifecycle (`stream/start`, `stream/end`)
-  - Controller and group state
-
-## Usage
-
-1. Build and install the app on an Android device.
-2. Enter the URL of your Sendspin server:
-   ```
-   ws://<host>:<port>/sendspin
-   ```
-3. Set a unique `client_id` and name.
-4. Connect.
-5. Adjust **Playout offset** if required to fine-tune sync with other Sendspin players.
-
-### Intent Parameters
-
-The app supports the following intent extras for programmatic configuration:
-
-- **`playoutOffsetMs`** (Long, optional)
-  - Sets the initial playout offset in milliseconds when the app starts
-  - Negative values cause the player to catch up (play earlier)
-  - Positive values delay playback (play later)
-  - Range: -1000ms to +1000ms
-  - **Persistence**: When provided via intent, this value overrides the saved offset. Any adjustments made via the UI slider are automatically saved and will be restored on the next app launch (unless overridden again by an intent parameter)
-  - Example:
-    ```bash
-    adb shell am start -n com.sendspinlite/.MainActivity \
-      --el playoutOffsetMs -50
-    ```
-    This starts the app with a 50ms catch-up offset (overriding any previously saved value).
-
-- **`enableOpusCodec`** (Boolean, optional)
-  - Enables Opus codec support for audio streaming
-  - When `true`: Opus is offered as the preferred codec (with PCM as fallback)
-  - When `false` (default): Only PCM is offered to the server
-  - **Default**: `false` (PCM-only mode optimized for local WiFi)
-  - **Use case**: Enable Opus when bandwidth is a concern; for local WiFi networks, PCM-only is recommended
-  - **Persistence**: When provided via intent, this value overrides the saved setting and persists across app restarts
-  - Example:
-    ```bash
-    adb shell am start -n com.sendspinlite/.MainActivity \
-      --ez enableOpusCodec true
-    ```
-    This starts the app with Opus codec enabled.
-
-  - Combined with playout offset:
-    ```bash
-    adb shell am start -n com.sendspinlite/.MainActivity \
-      --el playoutOffsetMs 0 \
-      --ez enableOpusCodec true
-    ```
+### Reliability & Performance
+- **Background service support**
+  - Foreground service for persistent playback
+  - Wake lock management for sustained operation
+  - Boot completion receiver for auto-start
+  - Memory-aware operation for low-end devices
+  - Watchdog monitoring for connection stability
 
 ## Requirements
 
-- Android API 26+
-- Sendspin-compatible server (homeassistant)
+- **Android**: API 24+ (Android 7.0 and later)
+- **Permissions**: 
+  - `INTERNET` - WebSocket communication
+  - `MODIFY_AUDIO_SETTINGS` - Audio playback control
+  - `WAKE_LOCK` - Prevent sleep during playback
+  - `FOREGROUND_SERVICE` - Background audio service
+  - `POST_NOTIFICATIONS` - Playback notifications (Android 13+)
+  - `NEARBY_WIFI_DEVICES` - mDNS service discovery (Android 12+)
+  - `RECEIVE_BOOT_COMPLETED` - Auto-start on device boot
+  - `ACCESS_NETWORK_STATE`, `CHANGE_NETWORK_STATE` - Network monitoring
+- **Server**: Sendspin-compatible server (e.g., Home Assistant with Sendspin integration)
 
-## Status
+## Getting Started
 
-This project is functional but still experimental.
-The UI exposes internal timing and buffering stats to aid debugging and sync tuning.
+### Basic Setup
 
-Issues:
-- When a group is playing, and the app is connected, it won't play audio until a track change is forced on music assistant (but I believe this is a server side bug which i've reported to HA)
-- .... it hasn't had much testing!
+1. Build and install the app on an Android device.
+2. Grant required permissions when prompted.
+3. The app will attempt automatic server discovery via mDNS.
+   - If discovery succeeds, the server URL is populated automatically.
+   - If discovery fails or times out, manually enter your server URL:
+     ```
+     ws://<host>:<port>/sendspin
+     ```
+4. Connect to the server.
+5. All configuration is performed server side.
 
-This is vibe coded - so may have unintentional comments and/or code
+### Intent Parameters
+
+The app supports launch parameters for programmatic configuration:
+
+#### `playoutOffsetMs` (Long, optional)
+- Sets the initial playout offset in milliseconds
+- Negative values: player catches up (plays earlier)
+- Positive values: player delays (plays later)
+- Range: -1000ms to +1000ms
+- **Persistence**: Intent parameter will be saved.
+- Example:
+  ```bash
+  adb shell am start -n com.sendspinlite/.MainActivity --el playoutOffsetMs -50
+  ```
+
+#### `enableOpusCodec` (Boolean, optional)
+- Enables Opus codec support
+- `true`: Opus offered as preferred codec (PCM as fallback)
+- `false`: PCM-only mode (default, optimized for local WiFi)
+- **Persistence**: Intent parameter overrides saved value and persists across restarts
+- Example:
+  ```bash
+  adb shell am start -n com.sendspinlite/.MainActivity --ez enableOpusCodec true
+  ```
+
+#### Combined Example
+```bash
+adb shell am start -n com.sendspinlite/.MainActivity \
+  --el playoutOffsetMs 0 \
+  --ez enableOpusCodec true
+```
+
+## Architecture
+
+### Core Components
+
+- **SendspinService**
+  - Background service managing WebSocket connection lifecycle
+  - Runs as foreground service with media playback notifications
+  - Handles connection persistence and recovery
+
+- **SendspinPcmClient**
+  - WebSocket protocol implementation
+  - Audio stream lifecycle management
+  - Clock synchronization loops
+  - Playout scheduling and timing control
+  - Memory monitoring and watchdog systems
+
+- **ClockSync**
+  - RTT-based offset estimation
+  - Drift calculation and uncertainty tracking
+  - SNR-based quality assessment
+
+- **AudioJitterBuffer**
+  - Timestamp-ordered queue management
+  - Late-frame detection and dropping
+  - Restart recovery logic for buffer deadlock prevention
+
+- **OpusDecoder**
+  - Concentus-based Opus to PCM decoding
+  - Automatic fallback when unavailable
+
+- **PcmAudioOutput**
+  - AndroidX AudioTrack wrapper
+  - Multi-bit-depth support (16/24/32-bit)
+  - Buffer management for low-latency playback
+
+- **ServiceDiscovery**
+  - mDNS service discovery using Android NSD Manager
+  - Automatic server detection on local network
+
+- **PlayerViewModel / MainActivity**
+  - Jetpack Compose UI state management
+  - User preference persistence
+  - Real-time diagnostics streaming
+
+## Protocol Overview
+
+### Binary Audio Frames
+- Type: `0x04`
+- 8-byte big-endian server timestamp (microseconds)
+- Followed by PCM or Opus audio payload
+
+### JSON Control Messages
+- **Handshake**: `client/hello`, `server/hello`
+- **Time Sync**: `client/time`, `server/time`
+- **Stream Lifecycle**: `stream/start`, `stream/end`
+- **Control**: Play, pause, stop, next, previous, volume
+- **Group State**: Volume, mute, playback state
+- **Metadata**: Track info, progress, playback state
+
+## Development Status
+
+This project is **functional but experimental**. The UI exposes internal timing, buffering, and network diagnostics to aid debugging and sync tuning. Contributions and bug reports are welcome.
 
 ---
-
-
