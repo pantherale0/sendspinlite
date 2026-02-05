@@ -1,0 +1,91 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Debug APK",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "assembleDebug"
+            ],
+            "windows": {
+                "command": ".\\gradlew.bat",
+                "args": [
+                    "assembleDebug"
+                ]
+            },
+            "problemMatcher": [
+                "$gradle"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            }
+        },
+        {
+            "label": "Build and Install Debug APK",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "installDebug"
+            ],
+            "windows": {
+                "command": ".\\gradlew.bat",
+                "args": [
+                    "installDebug"
+                ]
+            },
+            "problemMatcher": [
+                "$gradle"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "dependsOn": [
+                "Build Debug APK"
+            ]
+        },
+        {
+            "label": "Clean and Build Debug APK",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "clean",
+                "assembleDebug"
+            ],
+            "windows": {
+                "command": ".\\gradlew.bat",
+                "args": [
+                    "clean",
+                    "assembleDebug"
+                ]
+            },
+            "problemMatcher": [
+                "$gradle"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            }
+        }
+    ]
+}
