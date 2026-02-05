@@ -43,7 +43,7 @@ class SendspinService : Service() {
     // Reconnection retry tracking
     private var reconnectJob: Job? = null
     private var reconnectRetryCount = 0
-    private val MAX_RECONNECT_RETRIES = 10
+    // Unlimited reconnection attempts - will keep retrying until manually disconnected
     
     private fun checkIsLowMemoryDevice(): Boolean {
         return try {
@@ -379,6 +379,12 @@ class SendspinService : Service() {
             return
         }
 
+        // Reset reconnect retry counter when user explicitly calls connect()
+        // This allows recovery after hitting the max retry limit
+        reconnectRetryCount = 0
+        reconnectJob?.cancel()
+        reconnectJob = null
+
         disconnect()
 
         // Acquire wake lock when connecting
@@ -483,7 +489,7 @@ class SendspinService : Service() {
         reconnectRetryCount = 0
         
         reconnectJob = scope.launch {
-            while (reconnectRetryCount < MAX_RECONNECT_RETRIES) {
+            while (isActive) {
                 val currentStatus = _uiState.value.status
                 
                 // If port is closed, assume server is being upgraded - use longer wait
@@ -496,23 +502,19 @@ class SendspinService : Service() {
                     (1000L * Math.pow(2.0, reconnectRetryCount.toDouble())).toLong().coerceAtMost(60000L)
                 }
                 
-                Log.i(tag, "Reconnect attempt ${reconnectRetryCount + 1}/$MAX_RECONNECT_RETRIES, waiting ${delayMs}ms")
+                reconnectRetryCount++
+                Log.i(tag, "Reconnect attempt $reconnectRetryCount, waiting ${delayMs}ms")
                 
                 delay(delayMs)
                 
                 // Check if we still want to reconnect (haven't been manually disconnected)
                 if (_uiState.value.status.startsWith("failure:") || _uiState.value.status.startsWith("closed:")) {
-                    reconnectRetryCount++
-                    Log.i(tag, "Attempting auto-reconnect ($reconnectRetryCount/$MAX_RECONNECT_RETRIES)")
+                    Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
                     connect(wsUrl, clientId, clientName, fromBoot = false)
                 } else {
                     // Connection was restored or user disconnected, stop retrying
                     break
                 }
-            }
-            
-            if (reconnectRetryCount >= MAX_RECONNECT_RETRIES) {
-                Log.w(tag, "Max reconnect attempts reached, giving up")
             }
             
             reconnectJob = null
