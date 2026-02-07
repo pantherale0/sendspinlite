@@ -17,6 +17,11 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
         val pcmData: ByteArray
     )
 
+    // Hard cap to prevent unbounded memory growth.
+    // At 48kHz stereo 16-bit, each ~21ms chunk is ~4KB.
+    // 500 chunks ≈ 2MB max buffer, ~10 seconds of audio.
+    private val maxBufferChunks = 500
+
     private val q = PriorityQueue<Chunk>(compareBy { it.serverTimestampUs })
     private val lateDropsCounter = AtomicLong(0L)
 
@@ -45,6 +50,11 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
 
     fun offer(serverTsUs: Long, pcm: ByteArray) {
         synchronized(q) {
+            // Enforce hard cap: drop oldest chunks if buffer is full
+            while (q.size >= maxBufferChunks) {
+                q.poll()
+                lateDropsCounter.incrementAndGet()
+            }
             q.add(Chunk(serverTsUs, pcm))
         }
     }

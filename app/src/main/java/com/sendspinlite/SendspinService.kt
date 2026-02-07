@@ -90,6 +90,9 @@ class SendspinService : Service() {
     // Track the last connection URL to prevent duplicate connections
     private var lastConnectUrl: String? = null
     private var lastConnectTime: Long = 0
+    
+    // Store reference to unregister in onDestroy and prevent leak
+    private var memoryTrimCallback: android.content.ComponentCallbacks2? = null
 
     private data class NotificationState(
         val trackTitle: String?,
@@ -152,7 +155,8 @@ class SendspinService : Service() {
         registerVolumeChangeReceiver()
 
         // Register memory trim callbacks to respond to system memory pressure
-        registerComponentCallbacks(createMemoryTrimCallback())
+        memoryTrimCallback = createMemoryTrimCallback()
+        registerComponentCallbacks(memoryTrimCallback)
 
         // Monitor connection state and auto-reconnect on failures
         scope.launch {
@@ -212,6 +216,10 @@ class SendspinService : Service() {
     override fun onDestroy() {
         Log.i(tag, "Service destroyed")
         disconnect()
+
+        // Unregister memory trim callbacks to prevent leaking this service
+        memoryTrimCallback?.let { unregisterComponentCallbacks(it) }
+        memoryTrimCallback = null
 
         // Unregister network connectivity receiver
         unregisterNetworkReceiver()

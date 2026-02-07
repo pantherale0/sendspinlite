@@ -21,10 +21,14 @@ class SendspinPcmClient(
 ) {
     private val tag = "SendspinPcmClient"
 
+    companion object {
+        // Shared OkHttpClient to avoid leaking thread pools and connection pools on reconnect
+        private val sharedOkHttp = OkHttpClient.Builder()
+            .pingInterval(30, TimeUnit.SECONDS)
+            .build()
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val okHttp = OkHttpClient.Builder()
-        .pingInterval(30, TimeUnit.SECONDS)  // Increased from 10s to 30s to be more tolerant
-        .build()
 
     private var ws: WebSocket? = null
 
@@ -126,7 +130,7 @@ class SendspinPcmClient(
 
     // Track codec decode latency to adjust playoutOffsetUs dynamically
     private var decodeLatencyUs: Long = 0L  // Running average of decode time
-    private val decodeLatencySamples = mutableListOf<Long>()
+    private val decodeLatencySamples = ArrayDeque<Long>(30)
     private val maxDecodeLatencySamples = 30  // Keep rolling average of last 30 frames
 
     // Track last sent error state to prevent spam
@@ -224,7 +228,7 @@ class SendspinPcmClient(
             Log.w(tag, "Error during port check, proceeding with connection anyway: ${e.message}")
         }
 
-        ws = okHttp.newWebSocket(req, object : WebSocketListener() {
+        ws = sharedOkHttp.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(tag, "WS open")
                 isConnected.set(true)
@@ -318,12 +322,8 @@ class SendspinPcmClient(
             Log.w(tag, "Error during cleanup/sleep", e)
         }
 
-        try {
-            okHttp.dispatcher.executorService.shutdown()
-            okHttp.connectionPool.evictAll()
-        } catch (e: Exception) {
-            Log.w(tag, "Error shutting down OkHttpClient", e)
-        }
+        // Clear decode latency samples to free memory
+        decodeLatencySamples.clear()
 
         Log.i(tag, "Resources cleaned up")
     }
@@ -334,9 +334,9 @@ class SendspinPcmClient(
      * This ensures playback timing accounts for actual codec processing delay.
      */
     private fun recordDecodeLatency(decodeTimeUs: Long) {
-        decodeLatencySamples.add(decodeTimeUs)
-        if (decodeLatencySamples.size > maxDecodeLatencySamples) {
-            decodeLatencySamples.removeAt(0)
+        decodeLatencySamples.addLast(decodeTimeUs)
+        while (decodeLatencySamples.size > maxDecodeLatencySamples) {
+            decodeLatencySamples.removeFirst()
         }
 
         // Calculate moving average
