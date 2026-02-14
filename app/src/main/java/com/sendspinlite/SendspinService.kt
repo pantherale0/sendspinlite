@@ -86,6 +86,9 @@ class SendspinService : Service() {
     private var lastNetworkState: Boolean = false
     
     private var volumeChangeReceiver: BroadcastReceiver? = null
+    @Volatile
+    private var lastServerVolumeSetMs: Long = 0L
+    private val volumeSuppressWindowMs: Long = 500L
     
     // Track the last connection URL to prevent duplicate connections
     private var lastConnectUrl: String? = null
@@ -557,6 +560,10 @@ class SendspinService : Service() {
         _uiState.value = _uiState.value.copy(playerMutedFromServer = false)
     }
 
+    fun markServerVolumeSet() {
+        lastServerVolumeSetMs = System.currentTimeMillis()
+    }
+
     // Network connectivity monitoring
     private fun registerNetworkReceiver() {
         connectivityReceiver = object : BroadcastReceiver() {
@@ -652,6 +659,11 @@ class SendspinService : Service() {
                 if (intent?.action == "android.media.VOLUME_CHANGED_ACTION") {
                     val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
                     if (streamType == android.media.AudioManager.STREAM_MUSIC) {
+                        val nowMs = System.currentTimeMillis()
+                        if (nowMs - lastServerVolumeSetMs < volumeSuppressWindowMs) {
+                            Log.d(tag, "Volume change suppressed (server-initiated)")
+                            return
+                        }
                         Log.d(tag, "Volume changed, updating UI state and syncing to server")
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
                         val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)

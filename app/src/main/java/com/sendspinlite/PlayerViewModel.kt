@@ -151,6 +151,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                             val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                             val systemVolume = (serviceState.playerVolume * maxVolume / 100)
                             audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, systemVolume, 0)
+                            svc.markServerVolumeSet()
 
                             // Clear the flag in the service
                             svc.clearPlayerVolumeFlag()
@@ -161,6 +162,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                             if (serviceState.playerMuted) {
                                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
                             }
+
+                            svc.markServerVolumeSet()
 
                             // Clear the flag in the service
                             svc.clearPlayerMutedFlag()
