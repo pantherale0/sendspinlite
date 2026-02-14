@@ -103,7 +103,7 @@ class ClockSync(
         val delayUs = (t4 - t1) - (t3 - t2)
 
         // max_error = delay / 2
-        val maxErrorUs = (delayUs / 2.0).toLong().coerceAtLeast(0)
+        val maxErrorUs = (delayUs / 2.0).toLong()
 
 
         // Perform Kalman update
@@ -248,36 +248,37 @@ class ClockSync(
         val innovationUs = measurementUs - offsetPredUs
         lastResidualUs = innovationUs
 
-        // Innovation covariance: S = H * P_pred * H^T + R
-        val measVarianceUs2 = maxErrorUs.toDouble() * maxErrorUs.toDouble()
-        val innovationCovarianceUs2 = covOffsetPredUs2 + measVarianceUs2
-
-        // Kalman gains: K = P_pred * H^T / S
-        val kalmanGainOffset = if (innovationCovarianceUs2 > 0) {
-            covOffsetPredUs2 / innovationCovarianceUs2
-        } else {
-            0.0
-        }
-
-        val kalmanGainDrift = if (innovationCovarianceUs2 > 0) {
-            covOffsetDriftPredUsPpm / innovationCovarianceUs2
-        } else {
-            0.0
-        }
-
         // Check for adaptive forgetting trigger (Section 3.4)
         var covOffsetUpdateUs2 = covOffsetPredUs2
         var covDriftUpdatePpm2 = covDriftPredPpm2
         var covOffsetDriftUpdateUsPpm = covOffsetDriftPredUsPpm
 
         if (updateCount >= minSamplesBeforeForgetting) {
-            val forgetThreshold = adaptiveCutoffFraction * lastMaxErrorUs
+            val forgetThreshold = adaptiveCutoffFraction * maxErrorUs
             if (abs(innovationUs) > forgetThreshold) {
                 // Apply adaptive forgetting to covariances
-                covOffsetUpdateUs2 = forgetFactor * forgetFactor * covOffsetPredUs2
-                covDriftUpdatePpm2 = forgetFactor * forgetFactor * covDriftPredPpm2
-                covOffsetDriftUpdateUsPpm = forgetFactor * forgetFactor * covOffsetDriftPredUsPpm
+                val forgetVarianceFactor = forgetFactor * forgetFactor
+                covOffsetUpdateUs2 = forgetVarianceFactor * covOffsetPredUs2
+                covDriftUpdatePpm2 = forgetVarianceFactor * covDriftPredPpm2
+                covOffsetDriftUpdateUsPpm = forgetVarianceFactor * covOffsetDriftPredUsPpm
             }
+        }
+
+        // Innovation covariance: S = H * P_pred * H^T + R
+        val measVarianceUs2 = maxErrorUs.toDouble() * maxErrorUs.toDouble()
+        val innovationCovarianceUs2 = covOffsetUpdateUs2 + measVarianceUs2
+
+        // Kalman gains: K = P_pred * H^T / S
+        val kalmanGainOffset = if (innovationCovarianceUs2 > 0) {
+            covOffsetUpdateUs2 / innovationCovarianceUs2
+        } else {
+            0.0
+        }
+
+        val kalmanGainDrift = if (innovationCovarianceUs2 > 0) {
+            covOffsetDriftUpdateUsPpm / innovationCovarianceUs2
+        } else {
+            0.0
         }
 
         // State update: x = x_pred + K * y
