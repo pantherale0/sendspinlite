@@ -451,13 +451,13 @@ class SendspinPcmClient(
         sendJson("client/goodbye", JSONObject().put("reason", reason))
     }
 
-    private fun sendClientStateSynchronized(volume: Int = 100, muted: Boolean = false) {
+    private fun sendClientStateSynchronized(volume: Int = getActualSystemVolume(), muted: Boolean = false) {
         val player =
             JSONObject().put("state", "synchronized").put("volume", volume).put("muted", muted)
         sendJson("client/state", JSONObject().put("player", player))
     }
 
-    private fun sendClientStateError(volume: Int = 100, muted: Boolean = true) {
+    private fun sendClientStateError(volume: Int = getActualSystemVolume(), muted: Boolean = false) {
         // Don't send error state after stream has ended
         if (streamEnded) {
             return
@@ -583,19 +583,19 @@ class SendspinPcmClient(
             val minBufferMs = 50L  // Wait for 50ms buffer before starting playback
 
             // Normal "too-late" drop once we're running.
-            val lateDropUs = 50_000L
+            val lateDropUs = 200_000L
 
             // Make offset changes audible by catching up (dropping) or slowing down (waiting).
-            val dropLateUs = 80_000L
-            val targetLateUs = 20_000L
+            val dropLateUs = 250_000L
+            val targetLateUs = 100_000L
             val maxEarlySleepMs = 50L
 
             // NEW: if output is stopped and the queue head is very late, we must drop until near-now,
             // otherwise bufferAheadMs stays negative and we never restart (queue grows forever).
-            val restartKeepWithinUs = 20_000L      // bring head within 20ms late
-            val restartMinAheadMs = -20L           // allow small negative ahead at start
+            val restartKeepWithinUs = 200_000L      // bring head within 200ms late
+            val restartMinAheadMs = -200L           // allow small negative ahead at start
             val restartMinQueued =
-                1              // if we have any data after dropping, we can start
+                10              // if we have any data after dropping, we can start
 
             while (isActive && isConnected.get()) {
                 val snapshot = jitter.snapshot()
@@ -637,12 +637,19 @@ class SendspinPcmClient(
                     // Chunks will actually be needed playoutOffsetUs in the future (negative offset = sooner)
                     val effectiveBufferAheadMs = snap2.bufferAheadMs + (playoutOffsetUs / 1000L)
 
+                    // Only start if the head is not too far in the future to avoid starving the AudioTrack
+                    // while waiting in the playout loop. Allow up to 200ms ahead start.
+                    val isReadyToPlay = effectiveBufferAheadMs < 200
+
                     // Progressive startup based on chunk count
                     // With many chunks queued (after skip), start earlier to prevent excessive buffering
                     // Each chunk at 48kHz stereo ~21ms, so:
                     // - 10 chunks = ~210ms, 20 chunks = ~420ms, 30 chunks = ~630ms, etc.
                     val canStart = when {
                         snap2.queuedChunks < restartMinQueued -> false
+                        
+                        // If we have excessive chunks but they are too far in future, wait.
+                        !isReadyToPlay -> false
 
                         // Light buffering: wait for time-based threshold
                         snap2.queuedChunks < 15 ->
@@ -690,8 +697,7 @@ class SendspinPcmClient(
                 if (chunk == null) {
                     if (jitter.isEmpty()) {
                         // Throttle error state messages to prevent spam (already throttled in sendClientStateError)
-                        sendClientStateError()
-                        output.flushSilence(20)
+                        // Removed aggressive silence flushing here to prevent jitter
                     }
                     delay(2)
                     continue
@@ -770,7 +776,9 @@ class SendspinPcmClient(
                     continue
                 }
 
-                if (earlyUs > 5_000) {
+                // Increase delay threshold to allow filling AudioTrack hardware buffer (e.g. 40ms)
+                // This prevents starving the AudioTrack when we are slightly ahead of schedule.
+                if (earlyUs > 40_000) {
                     delay((earlyUs / 1000).coerceAtMost(maxEarlySleepMs))
                 }
 
@@ -853,7 +861,9 @@ class SendspinPcmClient(
                             )
                         }
 
-                        output.stop()
+                        // Use pause() to clear buffer for new stream, preserving track for resume/reuse
+                        output.pause()
+                        
                         jitter.clear()
                         opusDecoder = null
                     }
@@ -866,7 +876,8 @@ class SendspinPcmClient(
 
                 "stream/end" -> {
                     streamEnded = true
-                    output.stop()
+                    // Pause instead of stop to allow reuse
+                    output.pause()
                     jitter.clear()
                     opusDecoder = null
                     playAtServerUs = Long.MIN_VALUE
