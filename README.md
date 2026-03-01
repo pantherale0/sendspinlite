@@ -30,12 +30,22 @@ This project is specially designed for low memory devices and a local network co
 
 ### Diagnostics & Tuning
 - **Real-time diagnostics dashboard**
-  - Playout offset and sync drift (ppm)
+  - Sync drift (ppm) and uncertainty measurements
   - Network quality and stability assessment
   - Connection type and RTT latency
   - Buffer depth and late frame drops
+  - Audio pipeline latency monitoring
+  - Automatic playback speed adjustment (0.998x-1.002x) for buffer timing
   - Memory usage monitoring for low-end devices
   - Detailed stream information and state
+
+### Automatic Timing Control
+- **Adaptive playback speed adjustment**
+  - Continuous buffer-ahead monitoring
+  - Proportional control to maintain target latency
+  - Automatic speed tuning (0.998x to 1.002x) without user intervention
+  - Dampened deadband to prevent audible artifacts
+  - Real-time latency and speed display
 
 ### Reliability & Performance
 - **Background service support**
@@ -78,15 +88,13 @@ This project is specially designed for low memory devices and a local network co
 
 The app supports launch parameters for programmatic configuration:
 
-#### `playoutOffsetMs` (Long, optional)
+#### `playoutOffsetMs` (Long, optional - Deprecated)
 - Sets the initial playout offset in milliseconds
-- Negative values: player catches up (plays earlier)
-- Positive values: player delays (plays later)
-- Range: -1000ms to +1000ms
-- **Persistence**: Intent parameter will be saved.
-- Example:
+- **Note**: Playback timing is now automatically managed by the adaptive playback speed adjustment loop, which continuously adjusts playback speed (0.998x-1.002x) based on buffer-ahead measurements. Manual offset adjustments are generally unnecessary and may conflict with automatic timing control. This parameter is maintained for backwards compatibility only.
+- Legacy range: -1000ms to +1000ms
+- Example (use 0 for no manual offset):
   ```bash
-  adb shell am start -n com.sendspinlite/.MainActivity --el playoutOffsetMs -50
+  adb shell am start -n com.sendspinlite/.MainActivity --el playoutOffsetMs 0
   ```
 
 #### `enableOpusCodec` (Boolean, optional)
@@ -139,6 +147,9 @@ adb shell am start -n com.sendspinlite/.MainActivity \
 - **PcmAudioOutput**
   - AndroidX AudioTrack wrapper
   - Multi-bit-depth support (16/24/32-bit)
+  - Playback speed control for adaptive timing
+  - Pipeline latency estimation with smoothing
+  - Real-time latency and speed reporting
   - Buffer management for low-latency playback
 
 - **ServiceDiscovery**
@@ -161,12 +172,9 @@ adb shell am start -n com.sendspinlite/.MainActivity \
 - **Handshake**: `client/hello`, `server/hello`
 - **Time Sync**: `client/time`, `server/time`
 - **Stream Lifecycle**: `stream/start`, `stream/end`
-- **Control**: Play, pause, stop, next, previous, volume
-- **Group State**: Volume, mute, playback state
-- **Metadata**: Track info, progress, playback state
 
 ## Development Status
 
-This project is **functional but experimental**. The UI exposes internal timing, buffering, and network diagnostics to aid debugging and sync tuning. Contributions and bug reports are welcome.
+This project is **functional but experimental**. Contributions and bug reports are welcome.
 
 ---
