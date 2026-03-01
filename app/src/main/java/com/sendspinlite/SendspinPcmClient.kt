@@ -103,6 +103,7 @@ class SendspinPcmClient(
     private var timeLoopJob: Job? = null
     private var playoutJob: Job? = null
     private var statsJob: Job? = null
+    private var speedAdjustmentJob: Job? = null
     private var watchdogJob: Job? = null
 
     private var codec: String = ""
@@ -132,7 +133,7 @@ class SendspinPcmClient(
     // Fine-grained adjustment for network/device-specific latency variations
     // Allows per-connection tuning without requiring app restart
     @Volatile
-    private var playoutOffsetAdjustmentUs: Long = 0L  // Device-specific adjustment
+    private var playoutOffsetAdjustmentUs: Long = 0L  // Neutral by default; avoid systematic early playout
 
     // Track codec decode latency to adjust playoutOffsetUs dynamically
     private var decodeLatencyUs: Long = 0L  // Running average of decode time
@@ -165,6 +166,7 @@ class SendspinPcmClient(
     // Statistics counters
     private var audibleSyncCount: Long = 0  // Incremented when audible sync (catch-up) occurs
     private var kalmanErrorCount: Long = 0  // Incremented when Kalman filter detects anomalies
+    private var audioScheduleDebugCount = 0  // Debug counter for audio scheduling logs
 
     fun getAudibleSyncCount(): Long = audibleSyncCount
     fun getKalmanErrorCount(): Long = kalmanErrorCount
@@ -298,6 +300,7 @@ class SendspinPcmClient(
 
         timeLoopJob?.cancel(); timeLoopJob = null
         statsJob?.cancel(); statsJob = null
+        speedAdjustmentJob?.cancel(); speedAdjustmentJob = null
         watchdogJob?.cancel(); watchdogJob = null
 
         // Stop audio output - this prevents buffered data from continuing to play
@@ -547,7 +550,9 @@ class SendspinPcmClient(
                         rttUs = clock.getAverageRttUs(),
                         networkQuality = clock.getNetworkConditionQuality().toString(),
                         stability = clock.getClockStability().toString(),
-                        connectionType = getConnectionType()
+                        connectionType = getConnectionType(),
+                        playbackSpeedMultiplier = output.getCurrentPlaybackSpeed(),
+                        smoothedLatencyMs = output.getSmoothedLatencyMs()
                     )
                 }
 
@@ -567,6 +572,55 @@ class SendspinPcmClient(
                     )
                 }
                 delay(1000L)  // Run every second for responsive stat updates
+            }
+        }
+    }
+
+    private fun startPlaybackSpeedAdjustmentLoop() {
+        speedAdjustmentJob?.cancel()
+        speedAdjustmentJob = scope.launch {
+            var currentSpeed = 1.0f
+            var emaBufferAheadMs = Double.NaN
+
+            while (isActive && isConnected.get()) {
+                if (output.isStarted()) {
+                    val snapshot = jitter.snapshot()
+                    val rawAheadMs = snapshot.bufferAheadMs.toDouble()
+
+                    // EMA smoothing: α=0.3 → ~3-sample window; filters single-tick noise
+                    emaBufferAheadMs = if (emaBufferAheadMs.isNaN()) rawAheadMs
+                                       else 0.3 * rawAheadMs + 0.7 * emaBufferAheadMs
+
+                    // Target buffer-ahead = AudioTrack pipeline latency.
+                    val targetAheadMs = output.getEstimatedPipelineLatencyUs() / 1000.0
+                    val bufferErrorMs = emaBufferAheadMs - targetAheadMs
+
+                    // Gentle proportional control (Python-like cadence/strength).
+                    // Positive error => too far ahead => slow down (<1.0)
+                    // Negative error => behind => speed up (>1.0)
+                    val kP = 0.00005
+                    var desiredSpeed = (1.0 - (kP * bufferErrorMs)).coerceIn(0.998, 1.002)
+
+                    // Wider deadband prevents audible hunt around target.
+                    if (kotlin.math.abs(bufferErrorMs) < 12.0) {
+                        desiredSpeed = 1.0
+                    }
+
+                    // Quantize to 0.001x to reduce rapid tiny parameter churn.
+                    desiredSpeed = kotlin.math.round(desiredSpeed * 1000.0) / 1000.0
+
+                    // Always update AudioTrack (including back to 1.0) but avoid redundant calls
+                    val desiredSpeedF = desiredSpeed.toFloat()
+                    if (desiredSpeedF != currentSpeed) {
+                        output.setPlaybackSpeed(desiredSpeedF)
+                        currentSpeed = desiredSpeedF
+                    }
+                } else {
+                    // Reset state when output stops so we start fresh on next stream
+                    currentSpeed = 1.0f
+                    emaBufferAheadMs = Double.NaN
+                }
+                delay(1500L)  // Slower cadence to avoid over-correcting small buffer noise
             }
         }
     }
@@ -616,7 +670,8 @@ class SendspinPcmClient(
     private fun startPlayoutLoop() {
         playoutJob?.cancel()
         playoutJob = scope.launch {
-            val minBufferMs = 50L  // Wait for 50ms buffer before starting playback
+            val minBufferMs = 60L   // Start closer to target to reduce initial inter-device echo
+            val maxStartAheadMs = 120L // Prevent deep-start headroom that requires long catch-down
 
             // Normal "too-late" drop once we're running.
             val lateDropUs = 200_000L
@@ -624,14 +679,13 @@ class SendspinPcmClient(
             // Make offset changes audible by catching up (dropping) or slowing down (waiting).
             val dropLateUs = 250_000L
             val targetLateUs = 100_000L
-            val maxEarlySleepMs = 50L
 
             // NEW: if output is stopped and the queue head is very late, we must drop until near-now,
             // otherwise bufferAheadMs stays negative and we never restart (queue grows forever).
             val restartKeepWithinUs = 200_000L      // bring head within 200ms late
-            val restartMinAheadMs = -200L           // allow small negative ahead at start
+            val restartMinAheadMs = -50L            // only allow slight lateness at start
             val restartMinQueued =
-                10              // if we have any data after dropping, we can start
+                4               // ~80-90ms at 48kHz stereo; aligns with Python startup depth
 
             while (isActive && isConnected.get()) {
                 val snapshot = jitter.snapshot()
@@ -676,35 +730,10 @@ class SendspinPcmClient(
                     // Chunks will actually be needed playoutOffsetUs in the future (negative offset = sooner)
                     val effectiveBufferAheadMs = snap2.bufferAheadMs + (playoutOffsetUs / 1000L)
 
-                    // Only start if the head is not too far in the future to avoid starving the AudioTrack
-                    // while waiting in the playout loop. Allow up to 200ms ahead start.
-                    val isReadyToPlay = effectiveBufferAheadMs < 200
-
-                    // Progressive startup based on chunk count
-                    // With many chunks queued (after skip), start earlier to prevent excessive buffering
-                    // Each chunk at 48kHz stereo ~21ms, so:
-                    // - 10 chunks = ~210ms, 20 chunks = ~420ms, 30 chunks = ~630ms, etc.
-                    val canStart = when {
-                        snap2.queuedChunks < restartMinQueued -> false
-                        
-                        // If we have excessive chunks but they are too far in future, wait.
-                        !isReadyToPlay -> false
-
-                        // Light buffering: wait for time-based threshold
-                        snap2.queuedChunks < 15 ->
-                            effectiveBufferAheadMs >= minBufferMs || effectiveBufferAheadMs >= restartMinAheadMs
-
-                        // Moderate buffering (15-30 chunks = 300-630ms): start more eagerly
-                        snap2.queuedChunks < 30 ->
-                            effectiveBufferAheadMs >= 75L || snap2.bufferAheadMs >= 100L
-
-                        // Heavy buffering (30-60 chunks = 630ms-1.2s): very aggressive
-                        snap2.queuedChunks < 60 ->
-                            effectiveBufferAheadMs >= 50L || snap2.bufferAheadMs >= 75L
-
-                        // Excessive buffering (60+ chunks): start immediately
-                        else -> true
-                    }
+                    // Start only within a tight startup window so we don't launch 150-200ms late.
+                    val canStart =
+                        snap2.queuedChunks >= restartMinQueued &&
+                                effectiveBufferAheadMs in minBufferMs..maxStartAheadMs
 
                     if (canStart) {
                         output.start(sampleRate, channels, bitDepth)
@@ -772,6 +801,12 @@ class SendspinPcmClient(
                     clock.convertServerToClient(effectiveServerTsUs) + totalPlayoutOffsetUs
                 val now = nowUs()
                 val earlyUs = localPlayUs - now
+                
+                // Debug: log first few scheduling attempts
+                if (audioScheduleDebugCount < 3) {
+                    audioScheduleDebugCount++
+                    Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs/1000}ms playout=${totalPlayoutOffsetUs/1000}ms")
+                }
 
                 // If we're behind by a lot, drop chunks to catch up (audible effect).
                 if (earlyUs < -dropLateUs) {
@@ -816,10 +851,11 @@ class SendspinPcmClient(
                     continue
                 }
 
-                // Increase delay threshold to allow filling AudioTrack hardware buffer (e.g. 40ms)
-                // This prevents starving the AudioTrack when we are slightly ahead of schedule.
-                if (earlyUs > 40_000) {
-                    delay((earlyUs / 1000).coerceAtMost(maxEarlySleepMs))
+                // Sleep until we're exactly one pipeline-latency before the intended play time.
+                // This ensures data reaches the speaker at the correct moment regardless of buffer depth.
+                val pipelineLatencyUs = output.getEstimatedPipelineLatencyUs()
+                if (earlyUs > pipelineLatencyUs) {
+                    delay((earlyUs - pipelineLatencyUs) / 1000)
                 }
 
                 output.writePcm(pcmData)
@@ -863,6 +899,7 @@ class SendspinPcmClient(
                     startTimeSyncLoop()
                     startPlayoutLoop()
                     startStatsLoop()
+                    startPlaybackSpeedAdjustmentLoop()
                     startMemoryMonitoringLoop()
                     startWatchdogLoop()  // Monitor playback loop health
 

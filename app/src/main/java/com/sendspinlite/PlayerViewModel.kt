@@ -83,7 +83,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val trackDuration: Long? = null,
         val playbackSpeed: Int? = null,
         val repeatMode: String? = null,
-        val shuffleEnabled: Boolean? = null
+        val shuffleEnabled: Boolean? = null,
+        // Audio output stats
+        val playbackSpeedMultiplier: Float = 1.0f,
+        val smoothedLatencyMs: Double = 0.0
     )
 
     private val _ui = MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))

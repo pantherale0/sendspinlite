@@ -395,6 +395,24 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                     }
                     SyncInfoRow("Buffer", "${ui.queuedChunks} chunks (${ui.bufferAheadMs}ms ahead)", bufferColor)
                     
+                    // Display smoothed latency
+                    val latencyColor = when {
+                        ui.smoothedLatencyMs < 50.0 -> Color.Green
+                        ui.smoothedLatencyMs < 100.0 -> Color(0xFFFFA500)  // Orange
+                        else -> MaterialTheme.colors.error
+                    }
+                    SyncInfoRow("Audio Latency", "${"%.1f".format(ui.smoothedLatencyMs)}ms", latencyColor)
+                    
+                    // Display playback speed multiplier (only show if not 1.0x)
+                    if (ui.playbackSpeedMultiplier != 1.0f) {
+                        val speedColor = when {
+                            ui.playbackSpeedMultiplier >= 0.999f && ui.playbackSpeedMultiplier <= 1.001f -> Color.Green
+                            ui.playbackSpeedMultiplier >= 0.995f && ui.playbackSpeedMultiplier <= 1.005f -> Color(0xFFFFA500)  // Orange
+                            else -> MaterialTheme.colors.error
+                        }
+                        SyncInfoRow("Playback Speed", "${"%.3f".format(ui.playbackSpeedMultiplier)}x", speedColor)
+                    }
+                    
                     // Playout Offset input field
                     Row(
                         modifier = Modifier

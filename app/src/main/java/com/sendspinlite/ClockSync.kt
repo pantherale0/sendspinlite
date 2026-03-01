@@ -67,6 +67,13 @@ class ClockSync(
     private var updateCount: Int = 0            // _count
     private var offset: Double = 0.0            // _offset
     private var drift: Double = 0.0             // _drift
+    
+    // Baseline offset: the first measurement used to normalize all subsequent offsets
+    // This converts the huge monotonic clock difference into small millisecond sync values
+    private var baselineOffsetUs: Long? = null  // Captured on first measurement
+    
+    // Debug counter for timestamp conversion logging
+    private var conversionDebugCount = 0
 
     // Covariance matrix P (2x2, stored as 3 independent entries)
     private var offsetCovariance: Double = Double.POSITIVE_INFINITY      // _offset_covariance
@@ -117,10 +124,11 @@ class ClockSync(
         serverReceivedUs: Long,
         serverTransmittedUs: Long
     ) {
-        // NTP offset: ((T2 - T1) + (T3 - T4)) / 2
+        // NTP offset (client - server, not server - client):
+        // This gives the SMALL clock difference we need for sync, not the huge monotonic difference
         val measurement = (
-            (serverReceivedUs - clientTransmittedUs)
-            + (serverTransmittedUs - clientReceivedUs)
+            (clientTransmittedUs - serverReceivedUs)
+            + (clientReceivedUs - serverTransmittedUs)
         ) / 2
 
         // Half round-trip (max error): ((T4 - T1) - (T3 - T2)) / 2
@@ -138,13 +146,35 @@ class ClockSync(
      *
      * Matches the reference signature:
      *   update(measurement, max_error, time_added)
+     *
+     * Uses multi-sample initialization (5-10 measurements) before computing drift
+     * to avoid locking onto a bad offset from noisy early measurements.
      */
     private fun update(measurement: Long, maxError: Long, timeAddedUs: Long) {
         if (timeAddedUs == lastUpdateUs) return   // skip duplicate timestamps
 
-        // Track network metrics
-        val rtt = 2 * maxError
+        // Reject extreme outliers: if maxError (half-RTT) is much larger than recent RTT history
+        // Only apply after filter has converged to avoid rejecting valid startup measurements
         synchronized(networkMetricsLock) {
+            val rtt = 2 * maxError
+            
+            // Only apply outlier rejection after convergence with enough samples
+            if (hasConverged() && rttHistory.size >= 10) {
+                val sorted = rttHistory.sorted()
+                val medianRtt = if (sorted.size % 2 == 0) {
+                    (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
+                } else {
+                    sorted[sorted.size / 2]
+                }
+                
+                // Reject measurements where RTT > 4.0x the median (conservative outlier threshold)
+                // This allows natural network jitter while rejecting GC/UI jank spikes
+                if (rtt > 4.0 * medianRtt) {
+                    Log.w(tag, "Extreme outlier rejected: rtt=${rtt}us vs median=${medianRtt}us (factor=${rtt.toDouble() / medianRtt})")
+                    return
+                }
+            }
+            
             rttHistory.addLast(rtt)
             if (rttHistory.size > 20) rttHistory.removeFirst()
             maxErrorHistory.addLast(maxError)
@@ -162,45 +192,71 @@ class ClockSync(
         val updateStdDev: Double = maxError.toDouble()
         val measurementVariance: Double = updateStdDev * updateStdDev
 
-        // --- First measurement: initialise offset baseline ---
-        if (updateCount <= 0) {
+        // --- Multi-sample initialization phase (first 8 measurements) ---
+        // Accumulate measurements to find a stable offset baseline before computing drift.
+        // This prevents locking onto a noisy measurement and then being unable to recover.
+        if (updateCount < 8) {
             updateCount++
-            offset = measurement.toDouble()
-            offsetCovariance = measurementVariance
+            
+            // Normalize measurement: subtract baseline to get small sync error
+            // First measurement sets the baseline (will be near-zero after normalization)
+            if (baselineOffsetUs == null) {
+                baselineOffsetUs = measurement
+            }
+            val normalizedMeasurement = measurement - baselineOffsetUs!!
+            
+            if (updateCount == 1) {
+                // First measurement: initialize with normalized value (will be ~0)
+                offset = normalizedMeasurement.toDouble()
+                offsetCovariance = measurementVariance
+                drift = 0.0
+                driftCovariance = 0.0
+                offsetDriftCovariance = 0.0
+                lastMeasurementUs = normalizedMeasurement.toDouble()
+                lastMaxErrorUs = maxError
+                Log.i(tag, "Init [1/8]: offset=${normalizedMeasurement}us (raw=${measurement}us, baseline=${baselineOffsetUs}us)")
+                return
+            }
+            
+            // Measurements 2-8: average the normalized measurements to get stable baseline offset
+            // This acts as a low-pass filter rejecting noisy early RTT spikes
+            val alpha = 1.0 / updateCount  // Exponential moving average weight
+            offset = offset * (1.0 - alpha) + normalizedMeasurement.toDouble() * alpha
+            
+            // Update uncertainty to be variance of measurements
+            offsetCovariance = offsetCovariance * (1.0 - alpha) + measurementVariance * alpha
+            
+            // Keep drift at zero during initialization
             drift = 0.0
             driftCovariance = 0.0
             offsetDriftCovariance = 0.0
-
-            currentTimeElement = TimeElement(
-                lastUpdate = lastUpdateUs, offset = offset, drift = drift
-            )
-
-            lastMeasurementUs = measurement.toDouble()
+            
+            lastMeasurementUs = normalizedMeasurement.toDouble()
             lastMaxErrorUs = maxError
+            Log.i(tag, "Init [$updateCount/8]: offset=${offset.toLong()}us")
+            
+            if (updateCount == 8) {
+                // After 8 measurements, we have a stable offset baseline
+                // Initialize Kalman covariance matrix for full filter
+                offsetCovariance = offsetCovariance.coerceAtLeast(100.0)  // Measurement uncertainty
+                driftCovariance = 1.0  // Start learning drift
+                offsetDriftCovariance = 0.0
+                drift = 0.0  // Start drift estimation from zero
+                
+                currentTimeElement = TimeElement(
+                    lastUpdate = lastUpdateUs, offset = offset, drift = drift
+                )
+                Log.i(tag, "Initialization complete: offset=${offset.toLong()}us, starting Kalman filter for continuous drift tracking")
+            }
             return
         }
 
-        // --- Second measurement: initial drift estimate from finite differences ---
-        if (updateCount == 1) {
-            updateCount++
-            drift = (measurement - offset) / dt
-            offset = measurement.toDouble()
-            driftCovariance = if (dt > 0) (offsetCovariance + measurementVariance) / dt else 0.0
-            offsetCovariance = measurementVariance
-            offsetDriftCovariance = 0.0
-
-            currentTimeElement = TimeElement(
-                lastUpdate = lastUpdateUs, offset = offset, drift = drift
-            )
-
-            lastMeasurementUs = measurement.toDouble()
-            lastMaxErrorUs = maxError
-            Log.i(tag, "Second update: dt=${'$'}{dt.toLong()}us drift=${'$'}drift")
-            return
-        }
-
-        // --- Standard Kalman predict + correct (count >= 2) ---
+        // --- Full Kalman filter (count >= 9) ---
+        // Continuously track both offset AND drift using standard Kalman predict-correct
         updateCount++
+        
+        // Normalize measurement relative to baseline for consistent sync values
+        val normalizedMeasurement = measurement - baselineOffsetUs!!
 
         // == Prediction step ==
         val predictedOffset: Double = offset + drift * dt
@@ -223,7 +279,7 @@ class ClockSync(
             offsetProcessVariance
 
         // == Innovation & adaptive forgetting ==
-        val residual: Double = measurement.toDouble() - predictedOffset
+        val residual: Double = normalizedMeasurement.toDouble() - predictedOffset
         lastResidualUs = residual
 
         // Track Kalman anomalies: large residuals indicate filter is struggling
@@ -272,29 +328,31 @@ class ClockSync(
 
     /**
      * Convert a client timestamp to the equivalent server timestamp.
-     *
-     * T_server = T_client + offset + drift * (T_client - T_last_update)
      */
     fun convertClientToServer(clientTimeUs: Long): Long {
         val te = currentTimeElement
         val dt = (clientTimeUs - te.lastUpdate).toDouble()
-        val o = te.offset + te.drift * dt
-        return clientTimeUs + o.toLong()
+        val offsetWithDrift = te.offset + te.drift * dt
+        val fullOffsetUs = (baselineOffsetUs ?: 0L) + offsetWithDrift.toLong()
+        return clientTimeUs - fullOffsetUs
     }
 
     /**
      * Convert a server timestamp to the equivalent client timestamp.
-     *
-     * Inverse of convertClientToServer:
-     *   T_client = (T_server - offset + drift * T_last_update) / (1 + drift)
+     * client_time = server_time + baseline + offset
      */
     fun convertServerToClient(serverTimeUs: Long): Long {
         val te = currentTimeElement
-        val driftFactor = 1.0 + te.drift
-        if (driftFactor == 0.0) return (serverTimeUs.toDouble() - te.offset).toLong()
-        return (
-            (serverTimeUs.toDouble() - te.offset + te.drift * te.lastUpdate) / driftFactor
-        ).toLong()
+        val baseline = baselineOffsetUs ?: 0L
+        val fullOffset = baseline + te.offset.toLong()
+        val result = serverTimeUs + fullOffset
+        
+        if (conversionDebugCount < 3) {
+            conversionDebugCount++
+            Log.d(tag, "convertServerToClient: server=$serverTimeUs baseline=$baseline offset=${te.offset.toLong()}us -> client=$result")
+        }
+        
+        return result
     }
 
     /** Estimated offset in microseconds (server - client). */
@@ -310,7 +368,7 @@ class ClockSync(
     fun getDriftUncertaintyPpm(): Double = sqrt(driftCovariance.coerceAtLeast(0.0))
 
     /** True after at least 2 measurements with finite covariance (matches reference is_synchronized). */
-    fun hasConverged(): Boolean = updateCount >= 2 && offsetCovariance.isFinite()
+    fun hasConverged(): Boolean = updateCount >= 15 && offsetCovariance.isFinite()
 
     /** Number of Kalman updates processed. */
     fun getUpdateCount(): Int = updateCount

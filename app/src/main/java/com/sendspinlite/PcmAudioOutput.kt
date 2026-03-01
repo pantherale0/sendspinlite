@@ -5,6 +5,7 @@ import android.util.Log
 import kotlin.math.max
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class PcmAudioOutput {
     private val tag = "PcmAudioOutput"
@@ -22,6 +23,20 @@ class PcmAudioOutput {
     private var currentSampleRate = 48000
     private var currentChannels = 2
     private var currentBitDepth = 16
+
+    // Last reported minimum buffer size from AudioTrack HAL (bytes)
+    @Volatile
+    private var lastMinBufBytes: Int = 0
+
+    // Dynamic latency estimation state (frames)
+    private val totalFramesWritten = AtomicLong(0L)
+    private var playbackHeadRaw: Long = 0L
+    private var playbackHeadWraps: Long = 0L
+    private var smoothedLatencyUs: Long = 0L
+    
+    // Current playback speed
+    @Volatile
+    private var currentPlaybackSpeed: Float = 1.0f
 
     fun isStarted(): Boolean = started.get()
 
@@ -41,6 +56,7 @@ class PcmAudioOutput {
                     existingTrack.pause()
                     existingTrack.flush()
                     existingTrack.play()
+                    resetLatencyEstimatorLocked()
                     started.set(true)
                     Log.i(tag, "AudioTrack reused and resumed for new stream")
                     return
@@ -78,6 +94,7 @@ class PcmAudioOutput {
                 .build()
 
             val minBuf = AudioTrack.getMinBufferSize(safeSampleRate, channelMask, encoding)
+            lastMinBufBytes = minBuf
             // Calculate 250ms buffer size
             val bytesPerFrame = channels * (bitDepth / 8)
             val buffer250ms = (safeSampleRate * 0.25 * bytesPerFrame).toInt()
@@ -101,6 +118,7 @@ class PcmAudioOutput {
 
                 audioTrack.play()
                 track = audioTrack
+                resetLatencyEstimatorLocked()
                 started.set(true)
 
                 currentSampleRate = safeSampleRate
@@ -122,12 +140,21 @@ class PcmAudioOutput {
      */
     fun pause() {
         started.set(false)
+
+        // Wait briefly for active writers to exit before touching AudioTrack state.
+        var attempts = 30 // up to 300ms
+        while (writingCount.get() > 0 && attempts > 0) {
+            try { Thread.sleep(10) } catch (_: Exception) {}
+            attempts--
+        }
+
         synchronized(lock) {
             val t = track
             if (t != null && t.state == AudioTrack.STATE_INITIALIZED) {
                 try {
                     t.pause()
                     t.flush()
+                    resetLatencyEstimatorLocked()
                     Log.i(tag, "AudioTrack paused and flushed")
                 } catch (e: Exception) {
                     Log.w(tag, "Error pausing/flushing AudioTrack", e)
@@ -153,6 +180,7 @@ class PcmAudioOutput {
             if (t.playState != AudioTrack.PLAYSTATE_PLAYING) return
             
             var off = 0
+            val bytesPerFrame = currentChannels * (currentBitDepth / 8)
             while (off < pcm.size) {
                 if (!started.get()) break
                 
@@ -163,6 +191,9 @@ class PcmAudioOutput {
                         break
                     }
                     if (n == 0) break
+                    if (bytesPerFrame > 0) {
+                        totalFramesWritten.addAndGet((n / bytesPerFrame).toLong())
+                    }
                     off += n
                 } catch (e: Exception) {
                     Log.e(tag, "Error writing to AudioTrack", e)
@@ -173,6 +204,84 @@ class PcmAudioOutput {
             Log.e(tag, "Error in writePcm", e)
         } finally {
             writingCount.decrementAndGet()
+        }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        if (!started.get()) return
+        synchronized(lock) {
+            val t = track ?: return
+            if (!started.get()) return
+            if (t.state != AudioTrack.STATE_INITIALIZED) return
+            if (t.playState != AudioTrack.PLAYSTATE_PLAYING) return
+
+            try {
+                // Clamp speed to valid range (0.5x to 2.0x typical for AudioTrack)
+                val clampedSpeed = speed.coerceIn(0.5f, 2.0f)
+                // PlaybackParams requires API 23+
+                val params = PlaybackParams().setSpeed(clampedSpeed)
+                t.playbackParams = params
+                currentPlaybackSpeed = clampedSpeed
+                Log.d(tag, "Playback speed adjusted to ${String.format("%.3f", clampedSpeed)}x")
+            } catch (e: Exception) {
+                Log.w(tag, "Failed to set playback speed", e)
+            }
+        }
+    }
+
+    /**
+     * Get the current playback speed (1.0 = normal speed).
+     */
+    fun getCurrentPlaybackSpeed(): Float = currentPlaybackSpeed
+
+    /**
+     * Get the smoothed latency in milliseconds.
+     */
+    fun getSmoothedLatencyMs(): Double = smoothedLatencyUs / 1000.0
+
+    /**
+     * Estimated pipeline latency from AudioTrack write to speaker output (microseconds).
+     * Uses dynamic queue depth (written frames - played frames) with smoothing,
+     * and never goes below HAL minimum-buffer latency floor.
+     */
+    fun getEstimatedPipelineLatencyUs(): Long {
+        val bytesPerFrame = currentChannels * (currentBitDepth / 8)
+        val floorUs = if (lastMinBufBytes > 0 && currentSampleRate > 0 && bytesPerFrame > 0) {
+            (lastMinBufBytes.toLong() * 1_000_000L) / (currentSampleRate.toLong() * bytesPerFrame)
+        } else {
+            40_000L
+        }
+
+        val t = track
+        if (!started.get() || t == null || currentSampleRate <= 0) {
+            return floorUs
+        }
+
+        synchronized(lock) {
+            val trackRef = track ?: return floorUs
+            if (trackRef.state != AudioTrack.STATE_INITIALIZED) return floorUs
+
+            val raw = trackRef.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
+            if (raw < playbackHeadRaw) {
+                playbackHeadWraps++
+            }
+            playbackHeadRaw = raw
+
+            val playedFrames = raw + (playbackHeadWraps shl 32)
+            val writtenFrames = totalFramesWritten.get()
+            val queuedFrames = (writtenFrames - playedFrames).coerceAtLeast(0L)
+
+            val dynamicUs = (queuedFrames * 1_000_000L) / currentSampleRate.toLong()
+            val combinedUs = max(dynamicUs, floorUs)
+
+            smoothedLatencyUs = if (smoothedLatencyUs == 0L) {
+                combinedUs
+            } else {
+                // 70/30 IIR smoothing to avoid jittery control decisions
+                ((smoothedLatencyUs * 7L) + (combinedUs * 3L)) / 10L
+            }
+
+            return smoothedLatencyUs.coerceIn(20_000L, 250_000L)
         }
     }
 
@@ -203,6 +312,7 @@ class PcmAudioOutput {
 
     private fun stopInternal(t: AudioTrack?) {
         track = null // Clear reference so new writes fail fast
+        resetLatencyEstimatorLocked()
         if (t != null) {
             try {
                 if (t.state == AudioTrack.STATE_INITIALIZED) {
@@ -236,5 +346,13 @@ class PcmAudioOutput {
                 Log.w(tag, "Error releasing AudioTrack", e)
             }
         }
+    }
+
+    private fun resetLatencyEstimatorLocked() {
+        totalFramesWritten.set(0L)
+        playbackHeadRaw = 0L
+        playbackHeadWraps = 0L
+        smoothedLatencyUs = 0L
+        currentPlaybackSpeed = 1.0f
     }
 }
