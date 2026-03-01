@@ -175,6 +175,7 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
     var ipAddress by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("8927") }
     var showManualEntryDialog by remember { mutableStateOf(false) }
+    var playoutOffsetInput by remember { mutableStateOf(ui.playoutOffsetMs.toString()) }
 
     Column(
         modifier = Modifier
@@ -357,7 +358,16 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     SyncInfoRow("Stream", ui.streamDesc.ifBlank { "-" })
-                    SyncInfoRow("Offset", "${ui.offsetUs}μs")
+                    
+                    // Display sync uncertainty (lower = better sync stability)
+                    val uncertaintyColor = when {
+                        ui.offsetUncertaintyUs < 1_000 -> Color.Green
+                        ui.offsetUncertaintyUs < 5_000 -> Color(0xFFFFA500)  // Orange
+                        else -> MaterialTheme.colors.error
+                    }
+                    val uncertaintyMs = ui.offsetUncertaintyUs / 1000.0
+                    SyncInfoRow("Sync Uncertainty", "±${"%.2f".format(uncertaintyMs)}ms", uncertaintyColor)
+                    
                     val driftColor = when {
                         ui.driftPpm >= -5.0 && ui.driftPpm <= 5.0 -> Color.Green
                         ui.driftPpm >= -25.0 && ui.driftPpm <= 25.0 -> Color(0xFFFFA500)  // Orange
@@ -365,7 +375,7 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                     }
                     // Format drift: use scientific notation for very small values, regular format otherwise
                     val driftFormatted = when {
-                        kotlin.math.abs(ui.driftPpm) < 0.01 -> String.format("%.2e ppm", ui.driftPpm)
+                        kotlin.math.abs(ui.driftPpm) < 0.01 -> "< 0.01 ppm"
                         else -> String.format("%.3f ppm", ui.driftPpm)
                     }
                     SyncInfoRow("Drift", driftFormatted, driftColor)
@@ -376,7 +386,7 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                         ui.rttUs < 50_000 -> Color(0xFFFFA500)  // Orange
                         else -> MaterialTheme.colors.error
                     }
-                    SyncInfoRow("RTT", "~${ui.rttUs}μs", rttColor)
+                    SyncInfoRow("RTT", "~${"%.2f".format(ui.rttUs / 1000.0)}ms", rttColor)
                     
                     val bufferColor = when {
                         ui.queuedChunks >= 190 -> Color.Green
@@ -384,11 +394,61 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                         else -> MaterialTheme.colors.error
                     }
                     SyncInfoRow("Buffer", "${ui.queuedChunks} chunks (${ui.bufferAheadMs}ms ahead)", bufferColor)
-                    SyncInfoRow("Playout Offset", "${ui.playoutOffsetMs}ms")
+                    
+                    // Playout Offset input field
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Playout Offset",
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                        )
+                        OutlinedTextField(
+                            value = playoutOffsetInput,
+                            onValueChange = { newValue ->
+                                if (newValue.isEmpty() || newValue == "-" || newValue.toIntOrNull() != null) {
+                                    playoutOffsetInput = newValue
+                                    newValue.toLongOrNull()?.let { value ->
+                                        if (value in -500L..500L) {
+                                            vm.setPlayoutOffsetMs(value)
+                                        }
+                                    }
+                                }
+                            },
+                            label = { Text("ms") },
+                            singleLine = true,
+                            modifier = Modifier.width(100.dp),
+                            textStyle = MaterialTheme.typography.body2.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        )
+                    }
+                    
                     if (ui.lateDrops > 0) {
                         SyncInfoRow(
                             "Late Drops",
                             ui.lateDrops.toString(),
+                            color = MaterialTheme.colors.error
+                        )
+                    }
+                    
+                    // Display audible sync and Kalman error stats
+                    if (ui.audibleSyncCount > 0) {
+                        SyncInfoRow(
+                            "Audible Syncs",
+                            ui.audibleSyncCount.toString(),
+                            color = Color(0xFFFFA500)  // Orange
+                        )
+                    }
+                    if (ui.kalmanErrorCount > 0) {
+                        SyncInfoRow(
+                            "Kalman Errors",
+                            ui.kalmanErrorCount.toString(),
                             color = MaterialTheme.colors.error
                         )
                     }

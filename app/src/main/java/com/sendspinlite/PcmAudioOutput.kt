@@ -78,7 +78,12 @@ class PcmAudioOutput {
                 .build()
 
             val minBuf = AudioTrack.getMinBufferSize(safeSampleRate, channelMask, encoding)
-            val bufferBytes = max(minBuf, 4 * minBuf)
+            // Calculate 250ms buffer size
+            val bytesPerFrame = channels * (bitDepth / 8)
+            val buffer250ms = (safeSampleRate * 0.25 * bytesPerFrame).toInt()
+            
+            // Use at least 250ms buffer, or 4x minBuf, whichever is larger, to ensure stability
+            val bufferBytes = max(minBuf * 4, buffer250ms)
 
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)

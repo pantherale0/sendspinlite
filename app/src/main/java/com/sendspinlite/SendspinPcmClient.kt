@@ -124,9 +124,15 @@ class SendspinPcmClient(
     private var playAtServerUs: Long = Long.MIN_VALUE
 
     // Pipeline delay offset (µs). Compensates for Android audio pipeline latency + codec decode latency.
+    // For multi-device sync, tighter offset compensation improves inter-device synchronization.
     // -75ms balances responsiveness with reliable buffer management across varying network conditions
     @Volatile
     private var playoutOffsetUs: Long = -75_000L  // Default -75ms
+    
+    // Fine-grained adjustment for network/device-specific latency variations
+    // Allows per-connection tuning without requiring app restart
+    @Volatile
+    private var playoutOffsetAdjustmentUs: Long = 0L  // Device-specific adjustment
 
     // Track codec decode latency to adjust playoutOffsetUs dynamically
     private var decodeLatencyUs: Long = 0L  // Running average of decode time
@@ -156,10 +162,30 @@ class SendspinPcmClient(
     private val uiUpdateThrottleMs =
         if (isLowMemoryDevice) 250L else 100L  // Balanced throttle: 10 updates/sec (normal), 4 updates/sec (low-mem)
 
+    // Statistics counters
+    private var audibleSyncCount: Long = 0  // Incremented when audible sync (catch-up) occurs
+    private var kalmanErrorCount: Long = 0  // Incremented when Kalman filter detects anomalies
+
+    fun getAudibleSyncCount(): Long = audibleSyncCount
+    fun getKalmanErrorCount(): Long = kalmanErrorCount
+
     fun setPlayoutOffsetMs(ms: Long) {
         val clamped = ms.coerceIn(-1000L, 1000L)
         playoutOffsetUs = clamped * 1000L
         Log.i(tag, "playoutOffset=${clamped}ms")
+    }
+
+    /**
+     * Set per-device playout offset adjustment for fine-grained sync tuning.
+     * Use this to compensate for device-specific latency variations when multiple
+     * devices are synchronized. Typical values: -20ms to +20ms.
+     *
+     * @param ms Adjustment in milliseconds (clamped to ±100ms)
+     */
+    fun setPlayoutOffsetAdjustmentMs(ms: Long) {
+        val clamped = ms.coerceIn(-100L, 100L)
+        playoutOffsetAdjustmentUs = clamped * 1000L
+        Log.i(tag, "playoutOffsetAdjustment=${clamped}ms (for multi-device sync tuning)")
     }
 
     fun setEnableOpusCodec(enabled: Boolean) {
@@ -483,6 +509,7 @@ class SendspinPcmClient(
                 sendJson("client/time", JSONObject().put("client_transmitted", nowUs()))
 
                 // ADAPTIVE FREQUENCY based on network conditions and clock stability
+                // For multi-device sync, use more aggressive initial sync frequency
                 val nextIntervalMs = clock.getRecommendedSyncFrequencyMs()
 
                 // Log frequency changes for diagnostics
@@ -492,7 +519,8 @@ class SendspinPcmClient(
                     Log.i(
                         tag,
                         "client/time frequency: ${lastFrequencyLogMs}ms → ${nextIntervalMs}ms " +
-                                "network=$networkQuality stability=$clockStability "
+                                "network=$networkQuality stability=$clockStability " +
+                                "offset=${clock.estimatedOffsetUs() / 1000L}ms drift=${String.format("%.3f", clock.estimatedDriftPpm())}ppm"
                     )
                     lastFrequencyLogMs = nextIntervalMs
                 }
@@ -514,20 +542,28 @@ class SendspinPcmClient(
                 // Update UI with clock sync details - runs every 1 second for responsive updates
                 throttledUiUpdate {
                     it.copy(
-                        offsetUs = clock.estimatedOffsetUs(),
+                        offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
                         driftPpm = clock.estimatedDriftPpm(),
+                        rttUs = clock.getAverageRttUs(),
                         networkQuality = clock.getNetworkConditionQuality().toString(),
                         stability = clock.getClockStability().toString(),
                         connectionType = getConnectionType()
                     )
                 }
 
-                // Minimal logging to reduce memory pressure - skip formatted strings
+                // Detailed logging for multi-device sync diagnostics
                 if (!isLowMemoryDevice && System.currentTimeMillis() % 9000 < 100) {
+                    val offsetMs = clock.estimatedOffsetUs() / 1000.0
+                    val driftPpm = clock.estimatedDriftPpm()
+                    val driftUncertaintyPpm = clock.getDriftUncertaintyPpm()
+                    
                     Log.i(
                         tag,
-                        "stats: offset=${clock.estimatedOffsetUs()}us drift=${(clock.estimatedDriftPpm() * 1000).toLong() / 1000}ppm " +
-                                "queued=${snapshot.queuedChunks} ahead~=${snapshot.bufferAheadMs}ms codec=$codec"
+                        "sync: offset=${String.format("%.2f", offsetMs)}ms " +
+                                "drift=${String.format("%.3f", driftPpm)}ppm±${String.format("%.3f", driftUncertaintyPpm)} " +
+                                "jitter=${String.format("%.0f", clock.getEstimatedNetworkJitterUs() / 1000.0)}ms " +
+                                "playoutAdj=${playoutOffsetAdjustmentUs / 1000}ms " +
+                                "queued=${snapshot.queuedChunks} ahead=${snapshot.bufferAheadMs}ms codec=$codec"
                     )
                 }
                 delay(1000L)  // Run every second for responsive stat updates
@@ -609,8 +645,11 @@ class SendspinPcmClient(
                         queuedChunks = snapshot.queuedChunks,
                         bufferAheadMs = snapshot.bufferAheadMs,
                         lateDrops = snapshot.lateDrops,
-                        offsetUs = clock.estimatedOffsetUs(),
-                        driftPpm = clock.estimatedDriftPpm()
+                        offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
+                        driftPpm = clock.estimatedDriftPpm(),
+                        rttUs = clock.getAverageRttUs(),
+                        audibleSyncCount = audibleSyncCount,
+                        kalmanErrorCount = clock.getKalmanErrorCount()
                     )
                 }
 
@@ -725,8 +764,8 @@ class SendspinPcmClient(
                     )
                     else chunk.serverTimestampUs
 
-                // Calculate effective playout offset: pipeline delay + measured codec decode latency
-                val totalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs
+                // Calculate effective playout offset: pipeline delay + measured codec decode latency + device adjustment
+                val totalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs
 
                 // Convert server timestamp to client time using Kalman filter offset
                 val localPlayUs =
@@ -751,7 +790,7 @@ class SendspinPcmClient(
                         }
 
                         // Apply same decode latency compensation during catch-up as during normal playback
-                        val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs
+                        val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs
                         val nextLocalPlayUs =
                             clock.convertServerToClient(next.serverTimestampUs) + nextTotalPlayoutOffsetUs
                         val nextEarlyUs = nextLocalPlayUs - nowUs()
@@ -768,9 +807,10 @@ class SendspinPcmClient(
                         }
                     }
                     if (dropped > 1) {
+                        audibleSyncCount++
                         Log.w(
                             tag,
-                            "catch-up: dropped=$dropped (${(nowUs() - catchupStart) / 1000}ms) playoutOffset=${playoutOffsetUs / 1000}ms"
+                            "catch-up: dropped=$dropped (${(nowUs() - catchupStart) / 1000}ms) playoutOffset=${playoutOffsetUs / 1000}ms adjustment=${playoutOffsetAdjustmentUs / 1000}ms (audibleSyncCount=$audibleSyncCount)"
                         )
                     }
                     continue
@@ -832,16 +872,25 @@ class SendspinPcmClient(
                 }
 
                 "server/time" -> {
+                    // Per Sendspin spec: all timestamps are monotonic microseconds.
+                    // Server uses its own monotonic clock; client uses System.nanoTime()/1000.
+                    // No epoch or unit conversion is needed -- the Kalman filter tracks
+                    // the offset between the two monotonic clocks directly.
                     val clientTx = payload.getLong("client_transmitted")
                     val sRecv = payload.getLong("server_received")
                     val sTx = payload.getLong("server_transmitted")
                     val clientRx = nowUs()
+
+                    val rtt = clientRx - clientTx
+                    Log.d(tag, "server/time: T1=$clientTx T2=$sRecv T3=$sTx T4=$clientRx rtt=${rtt}us")
+
                     clock.onServerTime(clientTx, clientRx, sRecv, sTx)
                 }
 
                 "stream/start" -> {
                     streamEnded = false  // Reset flag when new stream starts
                     lastChunkServerTimestampUs = Long.MIN_VALUE  // Reset discontinuity detector
+                    
                     val player = payload.optJSONObject("player")
                     if (player != null) {
                         codec = player.optString("codec", codec)
@@ -857,7 +906,7 @@ class SendspinPcmClient(
                         onUiUpdate {
                             it.copy(
                                 status = "stream/start",
-                                streamDesc = "$codec ${sampleRate}Hz ${channels}ch ${bitDepth}bit"
+                                streamDesc = "$codec ${sampleRate / 1000}kHz ${channels}ch ${bitDepth}bit"
                             )
                         }
 

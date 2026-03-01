@@ -41,7 +41,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val playbackState: String = "",
         val groupName: String = "",
         val streamDesc: String = "",
-        val offsetUs: Long = 0,
+        val offsetUncertaintyUs: Long = 0,  // Sync stability (uncertainty in microseconds)
         val driftPpm: Double = 0.0,
         val driftUncertaintyPpm: Double = 0.0,
         val driftSnr: Double = 0.0,
@@ -53,6 +53,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val bufferAheadMs: Long = 0,
         val lateDrops: Long = 0,
         val playoutOffsetMs: Long = 0,
+        val audibleSyncCount: Long = 0,  // Number of times an audible offset adjustment occurred
+        val kalmanErrorCount: Long = 0,  // Number of Kalman filter anomalies detected
         val enableOpusCodec: Boolean = DEFAULT_ENABLE_OPUS_CODEC,
         val hasController: Boolean = false,
         val groupVolume: Int = 100,

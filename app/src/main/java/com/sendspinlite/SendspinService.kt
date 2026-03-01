@@ -16,6 +16,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.content.Context
+import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.PowerManager
 import android.util.Log
@@ -443,7 +444,11 @@ class SendspinService : Service() {
         }
 
         try {
-            startForeground(NOTIFICATION_ID, createNotification())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
             Log.i(tag, "Foreground service started successfully")
         } catch (e: Exception) {
             // May still fail if called from certain restricted contexts
@@ -492,6 +497,8 @@ class SendspinService : Service() {
 
         _uiState.value = _uiState.value.copy(connected = false, status = "disconnected")
         updateNotification()
+        
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun startAutoReconnect(wsUrl: String, clientId: String, clientName: String) {
