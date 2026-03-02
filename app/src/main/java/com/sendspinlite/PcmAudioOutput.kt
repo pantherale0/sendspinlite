@@ -118,6 +118,14 @@ class PcmAudioOutput {
                     AudioManager.AUDIO_SESSION_ID_GENERATE
                 )
 
+                if (audioTrack.state != AudioTrack.STATE_INITIALIZED) {
+                    Log.e(tag, "AudioTrack init failed (state=${audioTrack.state})")
+                    try { audioTrack.release() } catch (_: Exception) {}
+                    started.set(false)
+                    track = null
+                    return
+                }
+
                 audioTrack.play()
                 track = audioTrack
                 resetLatencyEstimatorLocked()
@@ -166,47 +174,92 @@ class PcmAudioOutput {
         }
     }
 
-    fun writePcm(pcm: ByteArray) {
-        if (pcm.isEmpty()) return
-        if (!started.get()) return
+    fun writePcm(pcm: ByteArray): Boolean {
+        if (pcm.isEmpty()) return true
+        if (!started.get()) return false
         
         // Signal we are using the track
         writingCount.incrementAndGet()
         try {
             // Double check state after increment
-            if (!started.get()) return
+            if (!started.get()) return false
             
-            val t = track ?: return
+            val t = track ?: return false
             
-            if (t.state == AudioTrack.STATE_UNINITIALIZED) return 
-            if (t.playState != AudioTrack.PLAYSTATE_PLAYING) return
+            if (t.state == AudioTrack.STATE_UNINITIALIZED) return false
+            if (t.playState != AudioTrack.PLAYSTATE_PLAYING) return false
             
             var off = 0
             val bytesPerFrame = currentChannels * (currentBitDepth / 8)
-            while (off < pcm.size) {
+            var zeroWriteCount = 0
+            val maxZeroWrites = 50  // ~100ms of zero writes before giving up
+            val writeStartTime = System.currentTimeMillis()
+            val maxWriteTime = 500L  // 500ms timeout to prevent blocking audio thread
+            
+            while (off < pcm.size && System.currentTimeMillis() - writeStartTime < maxWriteTime) {
                 if (!started.get()) break
                 
                 try {
-                    val n = t.write(pcm, off, pcm.size - off)
+                    val n = t.write(pcm, off, pcm.size - off, AudioTrack.WRITE_NON_BLOCKING)
                     if (n < 0) {
                         Log.w(tag, "AudioTrack.write() returned error: $n")
-                        break
+                        markTrackDeadAndRelease(t, "write_error_$n")
+                        return false
                     }
-                    if (n == 0) break
+                    if (n == 0) {
+                        // Buffer full - yield and retry a few times then give up
+                        zeroWriteCount++
+                        if (zeroWriteCount > maxZeroWrites) {
+                            Log.w(tag, "AudioTrack buffer persistently full after $zeroWriteCount attempts, skipping rest of chunk")
+                            return false
+                        }
+                        // Yield to other threads briefly
+                        Thread.yield()
+                        Thread.sleep(2)
+                        continue
+                    }
+                    // Reset zero write counter on successful write
+                    zeroWriteCount = 0
                     if (bytesPerFrame > 0) {
                         totalFramesWritten.addAndGet((n / bytesPerFrame).toLong())
                     }
                     off += n
                 } catch (e: Exception) {
                     Log.e(tag, "Error writing to AudioTrack", e)
-                    break
+                    markTrackDeadAndRelease(t, "write_exception")
+                    return false
                 }
             }
+            
+            // Log if we timed out
+            if (off < pcm.size) {
+                Log.w(tag, "writePcm timeout/incomplete: wrote ${off} of ${pcm.size} bytes")
+                return false
+            }
+            return true
         } catch (e: Exception) {
             Log.e(tag, "Error in writePcm", e)
+            return false
         } finally {
             writingCount.decrementAndGet()
         }
+    }
+
+    private fun markTrackDeadAndRelease(t: AudioTrack, reason: String) {
+        Log.w(tag, "Marking AudioTrack dead ($reason), forcing recreate")
+        started.set(false)
+
+        synchronized(lock) {
+            if (track === t) {
+                track = null
+                resetLatencyEstimatorLocked()
+            }
+        }
+
+        try { t.pause() } catch (_: Exception) {}
+        try { t.flush() } catch (_: Exception) {}
+        try { t.stop() } catch (_: Exception) {}
+        try { t.release() } catch (_: Exception) {}
     }
 
     fun setPlaybackSpeed(speed: Float) {
