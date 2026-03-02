@@ -71,7 +71,7 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p release_apk
-          mv app/build/outputs/apk/release/app-release.apk "release_apk/com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk"
+          mv app/build/outputs/apk/release/app-release.apk "release_apk/com.sendspinlite.apk"
         
       - name: Generate changelog from commits
         id: changelog
