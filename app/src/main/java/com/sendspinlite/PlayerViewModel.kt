@@ -151,29 +151,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             service?.let { svc ->
                 viewModelScope.launch {
                     svc.uiState.collect { serviceState ->
-                        // Handle server-commanded volume changes
-                        if (serviceState.playerVolumeFromServer) {
-                            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                            val systemVolume = (serviceState.playerVolume * maxVolume / 100)
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, systemVolume, 0)
-                            svc.markServerVolumeSet()
-
-                            // Clear the flag in the service
-                            svc.clearPlayerVolumeFlag()
-                        }
-
-                        // Handle server-commanded mute changes
-                        if (serviceState.playerMutedFromServer) {
-                            if (serviceState.playerMuted) {
-                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
-                            }
-
-                            svc.markServerVolumeSet()
-
-                            // Clear the flag in the service
-                            svc.clearPlayerMutedFlag()
-                        }
-
+                        // Volume and mute changes are now handled directly in the service
+                        // This ensures they work even when the app UI is not open (e.g., after boot)
+                        // Just update the UI state to reflect current state
+                        
                         // Only update player volume from service if it's from the server
                         // This prevents service state from overwriting local UI volume
                         if (serviceState.playerVolumeFromServer || _ui.value.playerVolume == 100) {

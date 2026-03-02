@@ -172,6 +172,38 @@ class SendspinService : Service() {
                 }
             }
         }
+        
+        // Monitor for server-commanded volume/mute changes and apply them to system
+        // This allows volume control to work even when MainActivity is not running (e.g., after boot)
+        scope.launch {
+            _uiState.collect { state ->
+                // Handle server-commanded volume changes
+                if (state.playerVolumeFromServer) {
+                    val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                    val systemVolume = (state.playerVolume * maxVolume / 100)
+                    audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, systemVolume, 0)
+                    Log.i(tag, "Applied server volume command: ${state.playerVolume}% (systemVolume=$systemVolume)")
+                    markServerVolumeSet()
+                    
+                    // Clear the flag
+                    _uiState.value = _uiState.value.copy(playerVolumeFromServer = false)
+                }
+                
+                // Handle server-commanded mute changes
+                if (state.playerMutedFromServer) {
+                    if (state.playerMuted) {
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                        audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
+                        Log.i(tag, "Applied server mute command: muted=${state.playerMuted}")
+                    }
+                    markServerVolumeSet()
+                    
+                    // Clear the flag
+                    _uiState.value = _uiState.value.copy(playerMutedFromServer = false)
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
