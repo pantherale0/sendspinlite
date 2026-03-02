@@ -41,15 +41,7 @@ jobs:
             echo "$KEYSTORE_CONTENT" | base64 -d > keystore.jks
             echo "SIGN_APK=true" >> $GITHUB_ENV
           fi
-        
-      - name: Build release APK
-        env:
-          KEYSTORE_FILE: ${{ github.workspace }}/keystore.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease
-        
+
       - name: Extract and update version from tag
         id: version
         run: |
@@ -67,7 +59,15 @@ jobs:
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           
           echo "Updated to versionCode=$VERSION_CODE versionName=$VERSION_NAME"
-          
+
+      - name: Build release APK
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/keystore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
       - name: Rename APK
         run: |
           mkdir -p release_apk
