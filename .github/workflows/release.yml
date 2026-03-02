@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
         
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -40,7 +42,7 @@ jobs:
             echo "SIGN_APK=true" >> $GITHUB_ENV
           fi
         
-      - name: Build signed APK
+      - name: Build release APK
         env:
           KEYSTORE_FILE: ${{ github.workspace }}/keystore.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -48,45 +50,99 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
         
-      - name: Extract version from build.gradle.kts
+      - name: Extract and update version from tag
         id: version
         run: |
-          VERSION_NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          VERSION_CODE=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)
           TAG_NAME=${{ github.ref_name }}
+          VERSION_NAME=${TAG_NAME#v}
+          
+          IFS='.' read -r MAJOR MINOR <<< "$VERSION_NAME"
+          VERSION_CODE=$((MAJOR * 10 + MINOR))
+          
+          sed -i "s/versionCode = [0-9]*/versionCode = $VERSION_CODE/" app/build.gradle.kts
+          sed -i "s/versionName = \"[^\"]*\"/versionName = \"$VERSION_NAME\"/" app/build.gradle.kts
+          
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           
+          echo "Updated to versionCode=$VERSION_CODE versionName=$VERSION_NAME"
+          
       - name: Rename APK
         run: |
-          mv app/build/outputs/apk/release/app-release.apk "com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk"
+          mkdir -p release_apk
+          mv app/build/outputs/apk/release/app-release.apk "release_apk/com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk"
         
-      - name: Generate changelog
+      - name: Generate changelog from commits
         id: changelog
         run: |
-          CHANGELOG="## Version ${{ steps.version.outputs.version_name }} (Build ${{ steps.version.outputs.version_code }})
+          git fetch --tags --quiet
           
-          **Release Date:** $(date -u +'%Y-%m-%d')
-          **Tag:** ${{ steps.version.outputs.tag_name }}
+          CURRENT_TAG=${{ steps.version.outputs.tag_name }}
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$CURRENT_TAG"^ 2>/dev/null || echo "")
           
-          ### Build Information
-          - APK Type: $([ "$SIGN_APK" = "true" ] && echo "Signed Release" || echo "Unsigned")
-          - Commit: ${{ github.sha }}
-          - Built by: GitHub Actions"
+          if [ -z "$PREVIOUS_TAG" ]; then
+            COMMIT_RANGE="HEAD"
+          else
+            COMMIT_RANGE="$PREVIOUS_TAG..HEAD"
+          fi
           
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "## Version ${{ steps.version.outputs.version_name }}"
+            echo ""
+            echo "**Release Date:** $(date -u +'%Y-%m-%d')"
+            echo ""
+            
+            FEATURES=$(git log $COMMIT_RANGE --pretty=format:"%s" --all-match --grep="^feat" 2>/dev/null || true)
+            if [ -n "$FEATURES" ]; then
+              echo "### ✨ Features"
+              echo ""
+              echo "$FEATURES" | while read -r line; do
+                echo "- $(echo "$line" | sed 's/^feat(.*): //' | sed 's/^feat: //')"
+              done
+              echo ""
+            fi
+            
+            FIXES=$(git log $COMMIT_RANGE --pretty=format:"%s" --all-match --grep="^fix" 2>/dev/null || true)
+            if [ -n "$FIXES" ]; then
+              echo "### 🐛 Bug Fixes"
+              echo ""
+              echo "$FIXES" | while read -r line; do
+                echo "- $(echo "$line" | sed 's/^fix(.*): //' | sed 's/^fix: //')"
+              done
+              echo ""
+            fi
+            
+            # Get all commits and filter out feat/fix
+            ALL_COMMITS=$(git log $COMMIT_RANGE --pretty=format:"%s")
+            OTHER_COMMITS=$(echo "$ALL_COMMITS" | grep -v "^feat" | grep -v "^fix" | grep -v "^perf" | grep -v "^refactor" || true)
+            
+            if [ -n "$OTHER_COMMITS" ]; then
+              echo "### 📝 Changes"
+              echo ""
+              echo "$OTHER_COMMITS" | while read -r line; do
+                [ -n "$line" ] && echo "- $line"
+              done
+              echo ""
+            fi
+            
+            echo "### 📋 Build Info"
+            echo ""
+            echo "- **Commit:** ${{ github.sha }}"
+            echo "- **Tag:** ${{ steps.version.outputs.tag_name }}"
+            echo "- **Build:** Signed Release"
+            
+          } > CHANGELOG.md
           
+          cat CHANGELOG.md
+        
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag_name }}
           name: SendSpin Lite v${{ steps.version.outputs.version_name }}
-          body: ${{ steps.changelog.outputs.body }}
-          files: |
-            com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk
+          body_path: CHANGELOG.md
+          files: release_apk/*
           draft: false
           prerelease: false
         env:
