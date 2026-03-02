@@ -1,5 +1,7 @@
 package com.sendspinlite
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.*
 import android.util.Log
 import kotlin.math.max
@@ -354,5 +356,24 @@ class PcmAudioOutput {
         playbackHeadWraps = 0L
         smoothedLatencyUs = 0L
         currentPlaybackSpeed = 1.0f
+    }
+
+    fun checkAudioCapabilities(context: Context) {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val pm = context.packageManager
+        val hasLowLatency = pm.hasSystemFeature(PackageManager.FEATURE_AUDIO_LOW_LATENCY)
+        val hasPro = pm.hasSystemFeature(PackageManager.FEATURE_AUDIO_PRO)
+        val optimalFramesStr = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
+        val optimalFrames = optimalFramesStr?.toIntOrNull() ?: 256
+        val optimalRateStr = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
+        val optimalRate = optimalRateStr?.toIntOrNull() ?: 48000
+        val deviceOptimalBuffer = optimalRate / optimalFrames
+        Log.i(tag, "Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBuffer=$deviceOptimalBuffer")
+        // For now we won't do anything with this, but we can explore adjusting the 250ms HAL buffer based on the deviceOptimalBuffer
+        // This could look like deviceOptimalBuffer*bufferSizing
+        // Buffer sizing might need to be dynamic depending on the spec of the device
+        // Will put us more at risk of underruns, chunk drops and recovery events via audibleSyncs
+        // The app will also be more sensitive to jitter, which can happen at anypoint on the audio pipeline
+        // Benefits to this would be a lower base output latency which will be good for responsiveness
     }
 }

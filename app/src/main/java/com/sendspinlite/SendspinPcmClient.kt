@@ -255,7 +255,7 @@ class SendspinPcmClient(
         } catch (e: Exception) {
             Log.w(tag, "Error during port check, proceeding with connection anyway: ${e.message}")
         }
-
+        output.checkAudioCapabilities(context)
         ws = sharedOkHttp.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(tag, "WS open")
