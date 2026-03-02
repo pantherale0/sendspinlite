@@ -23,7 +23,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_WS_URL = "ws_url"
         private const val KEY_PLAYOUT_OFFSET_MS = "playout_offset_ms"
         private const val KEY_ENABLE_OPUS_CODEC = "enable_opus_codec"
-        private const val DEFAULT_CLIENT_NAME = "Android Player"
+        private const val DEFAULT_CLIENT_ID = "android-id"
         private const val DEFAULT_PLAYOUT_OFFSET_MS = 0L
         private const val DEFAULT_ENABLE_OPUS_CODEC = false
     }
@@ -33,8 +33,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     data class UiState(
         val wsUrl: String = "",
-        val clientId: String = "android-player",
-        val clientName: String = "Android Player",
+        val clientId: String = DEFAULT_CLIENT_ID,
+        val clientName: String = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
         val connected: Boolean = false,
         val status: String = "idle",
         val activeRoles: String = "",
@@ -187,7 +187,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _ui.value = _ui.value.copy(
             wsUrl = savedWsUrl ?: "",
             clientId = deviceId,
-            clientName = DEFAULT_CLIENT_NAME,
+            clientName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
             enableOpusCodec = savedEnableOpusCodec
         )
         
@@ -245,7 +245,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
         
-        SendspinService.startService(getApplication(), wsUrl, deviceId, DEFAULT_CLIENT_NAME)
+        SendspinService.startService(getApplication(), wsUrl, deviceId, "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
     }
 
     fun selectDiscoveredServer(server: DiscoveredServer) {

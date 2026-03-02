@@ -20,7 +20,7 @@ class BootReceiver : BroadcastReceiver() {
                 return
             }
             
-            val clientName = "Android Player"
+            val clientName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
             
             // Get or retrieve hardware device ID
             var deviceId = prefs.getString("device_id", null)
