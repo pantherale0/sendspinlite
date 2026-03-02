@@ -167,6 +167,7 @@ class SendspinPcmClient(
     private var audibleSyncCount: Long = 0  // Incremented when audible sync (catch-up) occurs
     private var kalmanErrorCount: Long = 0  // Incremented when Kalman filter detects anomalies
     private var audioScheduleDebugCount = 0  // Debug counter for audio scheduling logs
+    private var lastRestartCatchupLogMs: Long = 0L
 
     fun getAudibleSyncCount(): Long = audibleSyncCount
     fun getKalmanErrorCount(): Long = kalmanErrorCount
@@ -307,7 +308,12 @@ class SendspinPcmClient(
         output.stop()
         jitter.clear()
         opusDecoder = null
+        decodeLatencyUs = 0L
+        decodeLatencySamples.clear()
         playAtServerUs = Long.MIN_VALUE
+        lastChunkServerTimestampUs = Long.MIN_VALUE
+        inDiscontinuityMode = false
+        audioScheduleDebugCount = 0
 
         onUiUpdate {
             it.copy(
@@ -686,6 +692,9 @@ class SendspinPcmClient(
             val restartMinAheadMs = -50L            // only allow slight lateness at start
             val restartMinQueued =
                 4               // ~80-90ms at 48kHz stereo; aligns with Python startup depth
+            val forceStartAfterLoops = 100          // ~1s with 10ms retry delay
+
+            var lateRestartLoops = 0
 
             while (isActive && isConnected.get()) {
                 val snapshot = jitter.snapshot()
@@ -717,10 +726,14 @@ class SendspinPcmClient(
                     if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartMinAheadMs) {
                         val dropped = jitter.dropWhileLate(nowUs(), restartKeepWithinUs)
                         if (dropped > 0) {
-                            Log.w(
-                                tag,
-                                "restart-catchup: dropped=$dropped head was late (ahead~${snapshot.bufferAheadMs}ms)"
-                            )
+                            val nowMs = System.currentTimeMillis()
+                            if (nowMs - lastRestartCatchupLogMs >= 1000L) {
+                                lastRestartCatchupLogMs = nowMs
+                                Log.w(
+                                    tag,
+                                    "restart-catchup: dropped=$dropped head was late (ahead~${snapshot.bufferAheadMs}ms)"
+                                )
+                            }
                         }
                     }
 
@@ -731,11 +744,28 @@ class SendspinPcmClient(
                     val effectiveBufferAheadMs = snap2.bufferAheadMs + (playoutOffsetUs / 1000L)
 
                     // Start only within a tight startup window so we don't launch 150-200ms late.
-                    val canStart =
+                    val canStartNormally =
                         snap2.queuedChunks >= restartMinQueued &&
                                 effectiveBufferAheadMs in minBufferMs..maxStartAheadMs
 
+                    // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
+                    // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
+                    if (!canStartNormally && snap2.queuedChunks >= restartMinQueued && snap2.bufferAheadMs < restartMinAheadMs) {
+                        lateRestartLoops++
+                    } else {
+                        lateRestartLoops = 0
+                    }
+
+                    val forceLateStart = lateRestartLoops >= forceStartAfterLoops
+                    val canStart = canStartNormally || forceLateStart
+
                     if (canStart) {
+                        if (forceLateStart && !canStartNormally) {
+                            Log.w(
+                                tag,
+                                "forcing late-start recovery: ahead=${snap2.bufferAheadMs}ms effectiveAhead=${effectiveBufferAheadMs}ms queued=${snap2.queuedChunks}"
+                            )
+                        }
                         output.start(sampleRate, channels, bitDepth)
 
                         // Initialize Opus decoder if needed
@@ -751,6 +781,7 @@ class SendspinPcmClient(
                         }
 
                         sendClientStateSynchronized()
+                        lateRestartLoops = 0
                         Log.i(
                             tag,
                             "Audio output started sr=$sampleRate ch=$channels bd=$bitDepth codec=$codec (buffered=${snap2.bufferAheadMs}ms)"
@@ -927,6 +958,10 @@ class SendspinPcmClient(
                 "stream/start" -> {
                     streamEnded = false  // Reset flag when new stream starts
                     lastChunkServerTimestampUs = Long.MIN_VALUE  // Reset discontinuity detector
+                    inDiscontinuityMode = false
+                    decodeLatencyUs = 0L
+                    decodeLatencySamples.clear()
+                    audioScheduleDebugCount = 0
                     
                     val player = payload.optJSONObject("player")
                     if (player != null) {

@@ -463,6 +463,8 @@ class ClockSync(
         drift = 0.0
         lastUpdateUs = 0
         updateCount = 0
+        baselineOffsetUs = null
+        conversionDebugCount = 0
         offsetCovariance = Double.POSITIVE_INFINITY
         offsetDriftCovariance = 0.0
         driftCovariance = 0.0
