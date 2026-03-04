@@ -3,15 +3,19 @@ package com.sendspinlite
 import android.Manifest
 import android.content.res.Configuration
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,8 +34,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.content.edit
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
 class MainActivity : ComponentActivity() {
     private val vm: PlayerViewModel by viewModels()
@@ -109,6 +117,59 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
     val discoveredServers by vm.discoveredServers.collectAsState()
     val scrollState = rememberScrollState()
     var showBatteryDialog by remember { mutableStateOf(showBatteryWarning) }
+    
+    // State for title tap counter (5 taps to export logs)
+    var titleTapCount by remember { mutableStateOf(0) }
+    var titleTapLastTime by remember { mutableStateOf(0L) }
+    
+    val context = LocalContext.current
+    var showExportDialog by remember { mutableStateOf(false) }
+    var logExportUri by remember { mutableStateOf<Uri?>(null) }
+    
+    // Launcher for saving file
+    val saveFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    val logsFile = File(context.filesDir, "sendspin_logs.txt")
+                    if (logsFile.exists()) {
+                        logsFile.inputStream().use { input ->
+                            input.copyTo(output)
+                        }
+                        Log.i("MainActivity", "Logs exported successfully to $uri")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error exporting logs: ${e.message}")
+            }
+        }
+    }
+    
+    fun handleTitleTap() {
+        val currentTime = System.currentTimeMillis()
+        // Reset counter if more than 3 seconds have passed
+        if (currentTime - titleTapLastTime > 3000) {
+            titleTapCount = 0
+        }
+        titleTapLastTime = currentTime
+        titleTapCount++
+        
+        if (titleTapCount == 5) {
+            titleTapCount = 0
+            // Trigger log export
+            exportAndShareLogs(context, ui) { uri ->
+                if (uri != null) {
+                    logExportUri = uri
+                    showExportDialog = true
+                    // Open file save dialog
+                    val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
+                    saveFileLauncher.launch("sendspin_logs_$timestamp.txt")
+                }
+            }
+        }
+    }
 
     // Sync with system volume when UI is shown
     LaunchedEffect(Unit) {
@@ -184,7 +245,11 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Sendspin Lite Player", style = MaterialTheme.typography.h5)
+        Text(
+            "Sendspin Lite Player",
+            style = MaterialTheme.typography.h5,
+            modifier = Modifier.clickable { handleTitleTap() }
+        )
 
         // Show discovery status or manual entry prompt
         if (!ui.connected) {
@@ -329,6 +394,22 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                 }
             )
         }
+        
+        // Export logs dialog
+        if (showExportDialog) {
+            AlertDialog(
+                onDismissRequest = { showExportDialog = false },
+                title = { Text("Logs Exported") },
+                text = { Text("Logs have been exported. You can find them using your device's file manager.") },
+                confirmButton = {
+                    Button(
+                        onClick = { showExportDialog = false }
+                    ) {
+                        Text("OK")
+                    }
+                }
+            )
+        }
 
         // Connection Status
         Text("Connection Status", style = MaterialTheme.typography.h6)
@@ -344,6 +425,7 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                     SyncInfoRow("Network Quality", ui.networkQuality, getNetworkQualityColor(ui.networkQuality))
                     SyncInfoRow("Stability", ui.stability, getStabilityColor(ui.stability))
                 }
+                SyncInfoRow("Drops", ui.connectionDrops.toString())
             }
         }
 
@@ -478,5 +560,111 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
             "Sendspin Lite v${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.caption
         )
+    }
+}
+
+/**
+ * Export application logs for debugging purposes.
+ * Collects logs from LogCat and creates a file in app's cache directory.
+ */
+private fun exportAndShareLogs(context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -> Unit) {
+    try {
+        // Create logs file in app's files directory
+        val logsFile = File(context.filesDir, "sendspin_logs.txt")
+        logsFile.delete()  // Clear previous logs
+        logsFile.createNewFile()
+        
+        val stringBuilder = StringBuilder()
+        stringBuilder.append("=== Sendspin Lite Logs ===\n")
+        stringBuilder.append("Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}\n")
+        stringBuilder.append("Android Version: ${Build.VERSION.RELEASE}\n")
+        stringBuilder.append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
+        stringBuilder.append("App Version: ${BuildConfig.VERSION_NAME}\n")
+        stringBuilder.append("=========================\n\n")
+        
+        // Audio Stack Information
+        stringBuilder.append("=== AUDIO STACK INFORMATION ===\n")
+        stringBuilder.append("Low Memory Device: ${uiState.isLowMemoryDevice}\n")
+        stringBuilder.append("Is TV: ${uiState.isTV}\n")
+        stringBuilder.append("Playback Speed Multiplier: ${String.format("%.3f", uiState.playbackSpeedMultiplier)}x\n")
+        stringBuilder.append("Playout Offset: ${uiState.playoutOffsetMs}ms\n")
+        stringBuilder.append("Enable Opus Codec: ${uiState.enableOpusCodec}\n")
+        stringBuilder.append("================================\n\n")
+        
+        // Current Stats Snapshot
+        stringBuilder.append("=== CURRENT STATS SNAPSHOT ===\n")
+        stringBuilder.append("Connection Status: ${uiState.status}\n")
+        stringBuilder.append("Connected: ${uiState.connected}\n")
+        stringBuilder.append("Connection Drops: ${uiState.connectionDrops}\n")
+        stringBuilder.append("Active Roles: ${uiState.activeRoles.ifBlank { "-" }}\n")
+        stringBuilder.append("Group Name: ${uiState.groupName.ifBlank { "-" }}\n")
+        stringBuilder.append("Connection Type: ${uiState.connectionType}\n")
+        stringBuilder.append("Network Quality: ${uiState.networkQuality}\n")
+        stringBuilder.append("Stability: ${uiState.stability}\n")
+        stringBuilder.append("\nPlayback:\n")
+        stringBuilder.append("  Playback State: ${uiState.playbackState.ifBlank { "-" }}\n")
+        stringBuilder.append("  Stream: ${uiState.streamDesc.ifBlank { "-" }}\n")
+        stringBuilder.append("  Smoothed Latency: ${String.format("%.1f", uiState.smoothedLatencyMs)}ms\n")
+        stringBuilder.append("\nAudio Sync:\n")
+        stringBuilder.append("  Sync Uncertainty: ${uiState.offsetUncertaintyUs / 1000.0}µs\n")
+        stringBuilder.append("  Drift: ${String.format("%.3f", uiState.driftPpm)} ppm\n")
+        stringBuilder.append("  Drift Uncertainty: ${String.format("%.3f", uiState.driftUncertaintyPpm)} ppm\n")
+        stringBuilder.append("  Drift SNR: ${String.format("%.2f", uiState.driftSnr)}\n")
+        stringBuilder.append("  RTT: ${String.format("%.2f", uiState.rttUs / 1000.0)}ms\n")
+        stringBuilder.append("\nBuffer:\n")
+        stringBuilder.append("  Queued Chunks: ${uiState.queuedChunks}\n")
+        stringBuilder.append("  Buffer Ahead: ${uiState.bufferAheadMs}ms\n")
+        stringBuilder.append("  Late Drops: ${uiState.lateDrops}\n")
+        stringBuilder.append("\nStatistics:\n")
+        stringBuilder.append("  Audible Sync Count: ${uiState.audibleSyncCount}\n")
+        stringBuilder.append("  Kalman Error Count: ${uiState.kalmanErrorCount}\n")
+        stringBuilder.append("\nVolume:\n")
+        stringBuilder.append("  Group Volume: ${uiState.groupVolume}%\n")
+        stringBuilder.append("  Group Muted: ${uiState.groupMuted}\n")
+        stringBuilder.append("  Player Volume: ${uiState.playerVolume}%\n")
+        stringBuilder.append("  Player Muted: ${uiState.playerMuted}\n")
+        stringBuilder.append("  From Server: ${uiState.playerVolumeFromServer}\n")
+        
+        if (uiState.hasMetadata) {
+            stringBuilder.append("\nMetadata:\n")
+            stringBuilder.append("  Title: ${uiState.trackTitle ?: "-"}\n")
+            stringBuilder.append("  Artist: ${uiState.trackArtist ?: "-"}\n")
+            stringBuilder.append("  Album: ${uiState.albumTitle ?: "-"}\n")
+            stringBuilder.append("  Album Artist: ${uiState.albumArtist ?: "-"}\n")
+            stringBuilder.append("  Year: ${uiState.trackYear ?: "-"}\n")
+            stringBuilder.append("  Track Number: ${uiState.trackNumber ?: "-"}\n")
+        }
+        
+        stringBuilder.append("================================\n\n")
+        
+        // Try to collect logs from logcat
+        try {
+            val process = Runtime.getRuntime().exec("logcat -d")
+            val reader = process.inputStream.bufferedReader()
+            val logs = reader.readText()
+            stringBuilder.append("=== SYSTEM LOGS (LOGCAT) ===\n")
+            stringBuilder.append(logs)
+            reader.close()
+            process.destroy()
+        } catch (e: Exception) {
+            stringBuilder.append("Note: Could not retrieve logcat output: ${e.message}\n")
+            stringBuilder.append("App logs will be available on next connection.\n")
+            Log.w("MainActivity", "Error collecting logcat: ${e.message}")
+        }
+        
+        // Write to file
+        logsFile.writeText(stringBuilder.toString())
+        
+        // Create URI using FileProvider
+        val logsUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            logsFile
+        )
+        
+        onLogsReady(logsUri)
+    } catch (e: Exception) {
+        Log.e("MainActivity", "Error exporting logs: ${e.message}")
+        onLogsReady(null)
     }
 }

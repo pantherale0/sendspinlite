@@ -36,6 +36,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val clientId: String = DEFAULT_CLIENT_ID,
         val clientName: String = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
         val connected: Boolean = false,
+        val connectionDrops: Int = 0,
         val status: String = "idle",
         val activeRoles: String = "",
         val playbackState: String = "",

@@ -45,6 +45,10 @@ class SendspinService : Service() {
     private var reconnectJob: Job? = null
     private var reconnectRetryCount = 0
     // Unlimited reconnection attempts - will keep retrying until manually disconnected
+
+    // Connection drop tracking
+    private var hasEstablishedConnection = false
+    private var dropCountedForCurrentOutage = false
     
     private fun checkIsLowMemoryDevice(): Boolean {
         return try {
@@ -443,7 +447,7 @@ class SendspinService : Service() {
             clientId = clientId,
             clientName = clientName,
             status = "connecting...",
-            connected = true
+            connected = true,
         )
 
         client = SendspinPcmClient(
@@ -452,7 +456,29 @@ class SendspinService : Service() {
             clientName = clientName,
             context = this,
             onUiUpdate = { patch ->
-                _uiState.value = patch(_uiState.value)
+                val previousState = _uiState.value
+                var newState = patch(previousState)
+
+                // Mark that we had at least one successful websocket connection.
+                if (newState.connected && newState.status == "ws_open") {
+                    hasEstablishedConnection = true
+                    dropCountedForCurrentOutage = false
+                }
+
+                // Count only unexpected connection losses, and only once per outage.
+                val unexpectedDisconnect =
+                    hasEstablishedConnection &&
+                    previousState.connected &&
+                    !newState.connected &&
+                    (newState.status.startsWith("failure:") || newState.status.startsWith("closed:"))
+
+                if (unexpectedDisconnect && !dropCountedForCurrentOutage) {
+                    dropCountedForCurrentOutage = true
+                    newState = newState.copy(connectionDrops = previousState.connectionDrops + 1)
+                    Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")
+                }
+
+                _uiState.value = newState
                 updateNotification()
             }
         ).also {

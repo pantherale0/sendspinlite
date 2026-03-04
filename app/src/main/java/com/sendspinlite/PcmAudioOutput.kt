@@ -264,22 +264,42 @@ class PcmAudioOutput {
 
     fun setPlaybackSpeed(speed: Float) {
         if (!started.get()) return
+        
+        // Clamp speed to valid range (0.5x to 2.0x typical for AudioTrack)
+        val clampedSpeed = speed.coerceIn(0.5f, 2.0f)
+        
+        // Skip if speed hasn't changed (avoid redundant calls)
+        if (kotlin.math.abs(clampedSpeed - currentPlaybackSpeed) < 0.0001f) {
+            return
+        }
+        
         synchronized(lock) {
             val t = track ?: return
             if (!started.get()) return
-            if (t.state != AudioTrack.STATE_INITIALIZED) return
-            if (t.playState != AudioTrack.PLAYSTATE_PLAYING) return
+            if (t.state != AudioTrack.STATE_INITIALIZED) {
+                Log.w(tag, "Cannot set playback speed: AudioTrack not initialized (state=${t.state})")
+                return
+            }
+            
+            // On low-end devices, playState might briefly not be PLAYING even though track is active.
+            // Check both PLAYING and PAUSED to handle edge cases.
+            val isPlayable = t.playState == AudioTrack.PLAYSTATE_PLAYING || 
+                            t.playState == AudioTrack.PLAYSTATE_PAUSED
+            if (!isPlayable) {
+                Log.w(tag, "Cannot set playback speed: AudioTrack not in playable state (playState=${t.playState})")
+                return
+            }
 
             try {
-                // Clamp speed to valid range (0.5x to 2.0x typical for AudioTrack)
-                val clampedSpeed = speed.coerceIn(0.5f, 2.0f)
                 // PlaybackParams requires API 23+
                 val params = PlaybackParams().setSpeed(clampedSpeed)
                 t.playbackParams = params
                 currentPlaybackSpeed = clampedSpeed
                 Log.d(tag, "Playback speed adjusted to ${String.format("%.3f", clampedSpeed)}x")
+            } catch (e: UnsupportedOperationException) {
+                Log.w(tag, "Playback speed not supported on this device/API level")
             } catch (e: Exception) {
-                Log.w(tag, "Failed to set playback speed", e)
+                Log.w(tag, "Failed to set playback speed to $clampedSpeed: ${e.message}")
             }
         }
     }

@@ -177,6 +177,13 @@ class SendspinPcmClient(
     private var forceResyncUntilUs: Long = 0L
     private var lastForceResyncLogMs: Long = 0L
 
+    // Audio cut and resync configuration for handling late drops
+    // When audio falls too far behind after packet loss, cut and resync instead of relying on slow playback speed
+    private val audioOutOfSyncThresholdMs = 150L  // If behind by >150ms, trigger audio cut
+    private val audioDropDetectionMs = 50L        // If we detect drops and buffer drops below this, prepare for cut
+    private val audioResyncTargetMs = 80L         // Target buffer depth after resync
+    private var lastAudioCutMs: Long = 0L         // Track when we last cut audio to avoid thrashing
+
     fun getAudibleSyncCount(): Long = audibleSyncCount
     fun getKalmanErrorCount(): Long = kalmanErrorCount
 
@@ -595,6 +602,7 @@ class SendspinPcmClient(
         speedAdjustmentJob = scope.launch {
             var currentSpeed = 1.0f
             var emaBufferAheadMs = Double.NaN
+            var lastSuccessfulSpeedUs = 0L
 
             while (isActive && isConnected.get()) {
                 if (output.isStarted()) {
@@ -623,18 +631,25 @@ class SendspinPcmClient(
                     // Quantize to 0.001x to reduce rapid tiny parameter churn.
                     desiredSpeed = kotlin.math.round(desiredSpeed * 1000.0) / 1000.0
 
-                    // Always update AudioTrack (including back to 1.0) but avoid redundant calls
+                    // Rate-limit speed adjustments to once per second to avoid thrashing on low-end devices
                     val desiredSpeedF = desiredSpeed.toFloat()
-                    if (desiredSpeedF != currentSpeed) {
-                        output.setPlaybackSpeed(desiredSpeedF)
-                        currentSpeed = desiredSpeedF
+                    if (kotlin.math.abs(desiredSpeedF - currentSpeed) > 0.0001f) {
+                        val nowUs = nowUs()
+                        if (nowUs - lastSuccessfulSpeedUs >= 1_000_000L) {
+                            output.setPlaybackSpeed(desiredSpeedF)
+                            currentSpeed = desiredSpeedF
+                            lastSuccessfulSpeedUs = nowUs
+                        }
                     }
                 } else {
                     // Reset state when output stops so we start fresh on next stream
                     currentSpeed = 1.0f
                     emaBufferAheadMs = Double.NaN
+                    lastSuccessfulSpeedUs = 0L
                 }
-                delay(1500L)  // Slower cadence to avoid over-correcting small buffer noise
+                // Faster cadence (1s instead of 1.5s) allows quicker response to buffer changes
+                // while still being gentle enough for low-end devices
+                delay(1000L)
             }
         }
     }
@@ -903,6 +918,35 @@ class SendspinPcmClient(
                         forceResyncUntilUs = 0L
                         Log.i(tag, "force-resync complete: early=${earlyUs / 1000}ms")
                     }
+                }
+
+                // NEW: Aggressive audio cut on extreme late drops
+                // Instead of relying on slow playback speed adjustment (1.002x), 
+                // cut audio when it falls too far behind and resync to catch up quickly.
+                // This prevents audible gaps and keeps group sync tight.
+                val earlyMs = earlyUs / 1000L
+                val nowMs = System.currentTimeMillis()
+                val timeSinceLastCutMs = nowMs - lastAudioCutMs
+
+                if (!forceResyncMode && earlyMs < -audioOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
+                    // Audio is >150ms late (too far behind to catch up with playback speed adjustment alone)
+                    val snapBeforeCut = jitter.snapshot()
+                    val lateDropsCount = snapBeforeCut.lateDrops
+                    
+                    // Trigger aggressive resync: cut and drop old audio
+                    Log.w(
+                        tag,
+                        "audio-cut triggered: too far behind (early=${earlyMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing."
+                    )
+                    
+                    // Stop playback, flush buffer, and resync
+                    output.stop()
+                    triggerForceResync("audio_out_of_sync_late_drop")
+                    lastAudioCutMs = nowMs
+                    
+                    val backoffNowUs = nowUs()
+                    nextStartAttemptUs = backoffNowUs + 500_000L  // Delay 500ms before restart attempt
+                    continue
                 }
                 
                 // Debug: log first few scheduling attempts
