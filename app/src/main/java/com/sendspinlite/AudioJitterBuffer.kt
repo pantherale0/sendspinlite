@@ -32,14 +32,21 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
     fun isEmpty(): Boolean = synchronized(q) { q.isEmpty() }
 
     /**
-     * Trim the buffer to keep only the most recent chunks.
-     * Useful for memory pressure situations where we want to keep some buffered audio but reduce memory usage.
+     * Trim the buffer under memory pressure by dropping far-future chunks (highest timestamps),
+     * keeping the [maxChunks] soonest-to-play chunks (lowest timestamps) intact.
+     *
+     * This is the correct direction: discarding future audio frees memory while the chunks
+     * that are about to be written to AudioTrack are preserved, preventing underruns.
      */
     fun trimTo(maxChunks: Int) {
         synchronized(q) {
-            while (q.size > maxChunks) {
-                q.poll()
-            }
+            if (q.size <= maxChunks) return
+            // Sort ascending by timestamp, keep the first maxChunks (soonest to play),
+            // discard the rest (far-future chunks).
+            // clear() + addAll() re-establishes the min-heap invariant via standard offer() insertions.
+            val toKeep = q.sortedBy { it.serverTimestampUs }.take(maxChunks)
+            q.clear()
+            q.addAll(toKeep)
         }
     }
 
