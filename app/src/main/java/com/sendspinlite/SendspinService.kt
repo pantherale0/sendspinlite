@@ -206,6 +206,16 @@ class SendspinService : Service() {
                     // Clear the flag
                     _uiState.value = _uiState.value.copy(playerMutedFromServer = false)
                 }
+
+                // Handle server-commanded static delay changes: persist to SharedPreferences
+                if (state.staticDelayMsFromServer) {
+                    val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
+                    prefs.edit().putLong("static_delay_ms", state.staticDelayMs).apply()
+                    Log.i(tag, "Persisted server-commanded static delay: ${state.staticDelayMs}ms")
+
+                    // Clear the flag
+                    _uiState.value = _uiState.value.copy(staticDelayMsFromServer = false)
+                }
             }
         }
     }
@@ -450,6 +460,14 @@ class SendspinService : Service() {
             connected = true,
         )
 
+        // Load persisted static delay from SharedPreferences (needed when starting from boot
+        // since the ViewModel is not running to initialize _uiState with the saved value)
+        val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
+        val savedStaticDelayMs = prefs.getLong("static_delay_ms", 0L).coerceIn(0L, 5000L)
+        if (savedStaticDelayMs != _uiState.value.staticDelayMs) {
+            _uiState.value = _uiState.value.copy(staticDelayMs = savedStaticDelayMs)
+        }
+
         client = SendspinPcmClient(
             wsUrl = wsUrl,
             clientId = clientId,
@@ -482,7 +500,7 @@ class SendspinService : Service() {
                 updateNotification()
             }
         ).also {
-            it.setPlayoutOffsetMs(_uiState.value.playoutOffsetMs)
+            it.setStaticDelayMs(_uiState.value.staticDelayMs)
         }
 
         // Start health monitoring when connecting
@@ -597,10 +615,10 @@ class SendspinService : Service() {
         }
     }
 
-    fun setPlayoutOffsetMs(ms: Long) {
-        val clamped = ms.coerceIn(-1000L, 1000L)
-        _uiState.value = _uiState.value.copy(playoutOffsetMs = clamped)
-        client?.setPlayoutOffsetMs(clamped)
+    fun setStaticDelayMs(ms: Long) {
+        val clamped = ms.coerceIn(0L, 5000L)
+        _uiState.value = _uiState.value.copy(staticDelayMs = clamped)
+        client?.setStaticDelayMs(clamped)
     }
 
     fun setEnableOpusCodec(enabled: Boolean) {
