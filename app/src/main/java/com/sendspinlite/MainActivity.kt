@@ -551,7 +551,7 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                         OutlinedTextField(
                             value = staticDelayInput,
                             onValueChange = { newValue ->
-                                if (newValue.isEmpty() || newValue.toIntOrNull() != null) {
+                                if (newValue.isEmpty() || newValue.toLongOrNull() != null) {
                                     staticDelayInput = newValue
                                     newValue.toLongOrNull()?.let { value ->
                                         if (value in 0L..5000L) {

@@ -464,7 +464,7 @@ class SendspinService : Service() {
         // since the ViewModel is not running to initialize _uiState with the saved value)
         val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
         val savedStaticDelayMs = prefs.getLong("static_delay_ms", 0L).coerceIn(0L, 5000L)
-        if (_uiState.value.staticDelayMs == 0L && savedStaticDelayMs > 0L) {
+        if (savedStaticDelayMs != _uiState.value.staticDelayMs) {
             _uiState.value = _uiState.value.copy(staticDelayMs = savedStaticDelayMs)
         }
 
