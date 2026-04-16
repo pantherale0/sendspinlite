@@ -57,12 +57,6 @@ class MainActivity : ComponentActivity() {
         // Ensure system bars remain visible and don't draw behind them
         WindowCompat.setDecorFitsSystemWindows(window, true)
         
-        // Check if playout offset is provided via intent (overrides saved value)
-        val playoutOffsetMs = intent.getLongExtra("playoutOffsetMs", Long.MIN_VALUE)
-        if (playoutOffsetMs != Long.MIN_VALUE) {
-            vm.setPlayoutOffsetMs(playoutOffsetMs)
-        }
-        
         // Check if Opus codec is requested via intent (overrides saved value)
         if (intent.hasExtra("enableOpusCodec")) {
             val enableOpusCodec = intent.getBooleanExtra("enableOpusCodec", false)
@@ -236,7 +230,6 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
     var ipAddress by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("8927") }
     var showManualEntryDialog by remember { mutableStateOf(false) }
-    var playoutOffsetInput by remember { mutableStateOf(ui.playoutOffsetMs.toString()) }
     var staticDelayInput by remember { mutableStateOf(ui.staticDelayMs.toString()) }
 
     // Keep staticDelayInput in sync when the value changes (e.g. from server command)
@@ -501,40 +494,6 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                         SyncInfoRow("Playback Speed", "${"%.3f".format(ui.playbackSpeedMultiplier)}x", speedColor)
                     }
                     
-                    // Playout Offset input field
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Playout Offset",
-                            style = MaterialTheme.typography.body2,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
-                        )
-                        OutlinedTextField(
-                            value = playoutOffsetInput,
-                            onValueChange = { newValue ->
-                                if (newValue.isEmpty() || newValue == "-" || newValue.toIntOrNull() != null) {
-                                    playoutOffsetInput = newValue
-                                    newValue.toLongOrNull()?.let { value ->
-                                        if (value in -500L..500L) {
-                                            vm.setPlayoutOffsetMs(value)
-                                        }
-                                    }
-                                }
-                            },
-                            label = { Text("ms") },
-                            singleLine = true,
-                            modifier = Modifier.width(100.dp),
-                            textStyle = MaterialTheme.typography.body2.copy(
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                            )
-                        )
-                    }
-
                     // Static Delay input field (Sendspin spec: static_delay_ms, 0-5000ms)
                     Row(
                         modifier = Modifier
@@ -627,7 +586,6 @@ private fun exportAndShareLogs(context: android.content.Context, uiState: Player
         stringBuilder.append("Low Memory Device: ${uiState.isLowMemoryDevice}\n")
         stringBuilder.append("Is TV: ${uiState.isTV}\n")
         stringBuilder.append("Playback Speed Multiplier: ${String.format("%.3f", uiState.playbackSpeedMultiplier)}x\n")
-        stringBuilder.append("Playout Offset: ${uiState.playoutOffsetMs}ms\n")
         stringBuilder.append("Static Delay: ${uiState.staticDelayMs}ms\n")
         stringBuilder.append("Enable Opus Codec: ${uiState.enableOpusCodec}\n")
         stringBuilder.append("================================\n\n")

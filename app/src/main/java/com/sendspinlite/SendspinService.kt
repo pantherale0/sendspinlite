@@ -500,7 +500,6 @@ class SendspinService : Service() {
                 updateNotification()
             }
         ).also {
-            it.setPlayoutOffsetMs(_uiState.value.playoutOffsetMs)
             it.setStaticDelayMs(_uiState.value.staticDelayMs)
         }
 
@@ -614,12 +613,6 @@ class SendspinService : Service() {
             
             reconnectJob = null
         }
-    }
-
-    fun setPlayoutOffsetMs(ms: Long) {
-        val clamped = ms.coerceIn(-1000L, 1000L)
-        _uiState.value = _uiState.value.copy(playoutOffsetMs = clamped)
-        client?.setPlayoutOffsetMs(clamped)
     }
 
     fun setStaticDelayMs(ms: Long) {

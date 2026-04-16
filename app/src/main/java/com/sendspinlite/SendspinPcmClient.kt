@@ -194,12 +194,6 @@ class SendspinPcmClient(
     fun getAudibleSyncCount(): Long = audibleSyncCount
     fun getKalmanErrorCount(): Long = kalmanErrorCount
 
-    fun setPlayoutOffsetMs(ms: Long) {
-        val clamped = ms.coerceIn(-1000L, 1000L)
-        playoutOffsetUs = clamped * 1000L
-        Log.i(tag, "playoutOffset=${clamped}ms")
-    }
-
     /**
      * Set the static delay in milliseconds (Sendspin spec: static_delay_ms).
      * This compensates for external device delay (speakers, amplifiers).
