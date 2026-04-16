@@ -237,6 +237,12 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
     var port by remember { mutableStateOf("8927") }
     var showManualEntryDialog by remember { mutableStateOf(false) }
     var playoutOffsetInput by remember { mutableStateOf(ui.playoutOffsetMs.toString()) }
+    var staticDelayInput by remember { mutableStateOf(ui.staticDelayMs.toString()) }
+
+    // Keep staticDelayInput in sync when the value changes (e.g. from server command)
+    LaunchedEffect(ui.staticDelayMs) {
+        staticDelayInput = ui.staticDelayMs.toString()
+    }
 
     Column(
         modifier = Modifier
@@ -528,6 +534,40 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                             )
                         )
                     }
+
+                    // Static Delay input field (Sendspin spec: static_delay_ms, 0-5000ms)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Static Delay",
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                        )
+                        OutlinedTextField(
+                            value = staticDelayInput,
+                            onValueChange = { newValue ->
+                                if (newValue.isEmpty() || newValue.toIntOrNull() != null) {
+                                    staticDelayInput = newValue
+                                    newValue.toLongOrNull()?.let { value ->
+                                        if (value in 0L..5000L) {
+                                            vm.setStaticDelayMs(value)
+                                        }
+                                    }
+                                }
+                            },
+                            label = { Text("ms") },
+                            singleLine = true,
+                            modifier = Modifier.width(100.dp),
+                            textStyle = MaterialTheme.typography.body2.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        )
+                    }
                     
                     if (ui.lateDrops > 0) {
                         SyncInfoRow(
@@ -588,6 +628,7 @@ private fun exportAndShareLogs(context: android.content.Context, uiState: Player
         stringBuilder.append("Is TV: ${uiState.isTV}\n")
         stringBuilder.append("Playback Speed Multiplier: ${String.format("%.3f", uiState.playbackSpeedMultiplier)}x\n")
         stringBuilder.append("Playout Offset: ${uiState.playoutOffsetMs}ms\n")
+        stringBuilder.append("Static Delay: ${uiState.staticDelayMs}ms\n")
         stringBuilder.append("Enable Opus Codec: ${uiState.enableOpusCodec}\n")
         stringBuilder.append("================================\n\n")
         

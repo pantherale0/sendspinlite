@@ -136,6 +136,13 @@ class SendspinPcmClient(
     @Volatile
     private var playoutOffsetAdjustmentUs: Long = 0L  // Neutral by default; avoid systematic early playout
 
+    // Static delay (µs) per Sendspin spec: compensates for external speaker/amplifier delay.
+    // Range: 0-5000ms (0 = audio exits port at the server timestamp).
+    // Reported in client/state as static_delay_ms; server can change it via set_static_delay command.
+    // Persisted across reboots and reconnections.
+    @Volatile
+    private var staticDelayUs: Long = 0L
+
     // Track codec decode latency to adjust playoutOffsetUs dynamically
     private var decodeLatencyUs: Long = 0L  // Running average of decode time
     private val decodeLatencySamples = ArrayDeque<Long>(30)
@@ -191,6 +198,17 @@ class SendspinPcmClient(
         val clamped = ms.coerceIn(-1000L, 1000L)
         playoutOffsetUs = clamped * 1000L
         Log.i(tag, "playoutOffset=${clamped}ms")
+    }
+
+    /**
+     * Set the static delay in milliseconds (Sendspin spec: static_delay_ms).
+     * This compensates for external device delay (speakers, amplifiers).
+     * Range: 0-5000ms. Persisted across reboots and reconnections.
+     */
+    fun setStaticDelayMs(ms: Long) {
+        val clamped = ms.coerceIn(0L, 5000L)
+        staticDelayUs = clamped * 1000L
+        Log.i(tag, "staticDelay=${clamped}ms")
     }
 
     /**
@@ -490,10 +508,11 @@ class SendspinPcmClient(
         onUiUpdate { it.copy(playerMuted = muted, playerMutedFromServer = false) }
     }
 
-    private fun sendClientStatePlayer(volume: Int? = null, muted: Boolean? = null) {
-        val player = JSONObject().put("state", "synchronized")
+    private fun sendClientStatePlayer(volume: Int? = null, muted: Boolean? = null, staticDelayMs: Long? = null) {
+        val player = JSONObject()
         volume?.let { player.put("volume", it) }
         muted?.let { player.put("muted", it) }
+        staticDelayMs?.let { player.put("static_delay_ms", it) }
         sendJson("client/state", JSONObject().put("player", player))
     }
 
@@ -502,9 +521,16 @@ class SendspinPcmClient(
     }
 
     private fun sendClientStateSynchronized(volume: Int = getActualSystemVolume(), muted: Boolean = false) {
-        val player =
-            JSONObject().put("state", "synchronized").put("volume", volume).put("muted", muted)
-        sendJson("client/state", JSONObject().put("player", player))
+        val currentStaticDelayMs = staticDelayUs / 1000L
+        val player = JSONObject()
+            .put("volume", volume)
+            .put("muted", muted)
+            .put("static_delay_ms", currentStaticDelayMs)
+            .put("supported_commands", JSONArray().put("set_static_delay"))
+        val payload = JSONObject()
+            .put("state", "synchronized")
+            .put("player", player)
+        sendJson("client/state", payload)
     }
 
     private fun sendClientStateError(volume: Int = getActualSystemVolume(), muted: Boolean = false) {
@@ -520,8 +546,15 @@ class SendspinPcmClient(
         }
         lastErrorStateSent = now
 
-        val player = JSONObject().put("state", "error").put("volume", volume).put("muted", muted)
-        sendJson("client/state", JSONObject().put("player", player))
+        val currentStaticDelayMs = staticDelayUs / 1000L
+        val player = JSONObject()
+            .put("volume", volume)
+            .put("muted", muted)
+            .put("static_delay_ms", currentStaticDelayMs)
+        val payload = JSONObject()
+            .put("state", "error")
+            .put("player", player)
+        sendJson("client/state", payload)
     }
 
     private fun startTimeSyncLoop() {
@@ -890,7 +923,8 @@ class SendspinPcmClient(
                     else chunk.serverTimestampUs
 
                 // Calculate effective playout offset: pipeline delay + measured codec decode latency + device adjustment
-                val totalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs
+                // Subtract staticDelayUs to schedule audio earlier, compensating for external device delay
+                val totalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
 
                 // Convert server timestamp to client time using Kalman filter offset
                 val localPlayUs =
@@ -972,7 +1006,7 @@ class SendspinPcmClient(
                         }
 
                         // Apply same decode latency compensation during catch-up as during normal playback
-                        val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs
+                        val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
                         val nextLocalPlayUs =
                             clock.convertServerToClient(next.serverTimestampUs) + nextTotalPlayoutOffsetUs
                         val nextEarlyUs = nextLocalPlayUs - nowUs()
@@ -1298,6 +1332,22 @@ class SendspinPcmClient(
                                 }
                                 // Echo back in state
                                 sendClientStatePlayer(volume = null, muted = muted)
+                            }
+
+                            "set_static_delay" -> {
+                                val newDelayMs = player.optLong("static_delay_ms", 0L)
+                                    .coerceIn(0L, 5000L)
+                                Log.i(tag, "server/command set_static_delay: ${newDelayMs}ms (server commanded)")
+                                staticDelayUs = newDelayMs * 1000L
+                                // Notify service to persist the new delay
+                                onUiUpdate {
+                                    it.copy(
+                                        staticDelayMs = newDelayMs,
+                                        staticDelayMsFromServer = true
+                                    )
+                                }
+                                // Echo back in state
+                                sendClientStatePlayer(staticDelayMs = newDelayMs)
                             }
                         }
                     }
