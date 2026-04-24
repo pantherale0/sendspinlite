@@ -2,7 +2,9 @@ package com.sendspinlite
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import io.sentry.Sentry
 import io.sentry.SentryEvent
@@ -64,13 +66,13 @@ object CrashReportingManager {
 
     /** Returns the pending crash report file, or null if there is none. */
     fun getPendingCrashReport(context: Context): File? {
-        val file = File(context.filesDir, CRASH_REPORT_FILE)
+        val file = getCrashReportFile(context)
         return if (file.exists() && file.length() > 0) file else null
     }
 
     /** Delete the pending crash report file. */
     fun clearPendingCrashReport(context: Context) {
-        File(context.filesDir, CRASH_REPORT_FILE).delete()
+        getCrashReportFile(context).delete()
     }
 
     /**
@@ -108,6 +110,36 @@ object CrashReportingManager {
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /**
+     * Returns the [File] that crash reports are written to / read from.
+     *
+     * On Android 10+ the report lands in the app-specific external documents folder
+     * (`/sdcard/Android/data/com.sendspinlite/files/Documents/`) which is readable by any
+     * file manager without requiring a runtime permission.
+     *
+     * On Android 9 and below the public Documents folder (`/sdcard/Documents/`) is used when
+     * [android.Manifest.permission.WRITE_EXTERNAL_STORAGE] has been granted; otherwise the
+     * private internal files directory is used as a fallback.
+     */
+    private fun getCrashReportFile(context: Context): File {
+        val dir: File = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                // API 29+: app-specific external dir — no permission required, visible in file manager
+                context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                    ?: context.filesDir
+            }
+            Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED &&
+                    context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                    PackageManager.PERMISSION_GRANTED -> {
+                // API < 29 with storage permission: public Documents folder on /sdcard
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            }
+            else -> context.filesDir
+        }
+        dir.mkdirs()
+        return File(dir, CRASH_REPORT_FILE)
+    }
 
     private fun initSentry(context: Context) {
         val dsn = BuildConfig.SENTRY_DSN
@@ -173,6 +205,6 @@ object CrashReportingManager {
             sb.appendLine("(logcat unavailable: ${e.message})")
         }
 
-        File(context.filesDir, CRASH_REPORT_FILE).writeText(sb.toString())
+        getCrashReportFile(context).writeText(sb.toString())
     }
 }

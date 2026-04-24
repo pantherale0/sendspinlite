@@ -51,6 +51,12 @@ class MainActivity : ComponentActivity() {
         // NSD discovery will start or continue based on permission grant
     }
 
+    // Needed on Android 9 and below so crash reports can be written to the public Documents folder.
+    // On Android 10+ no permission is required (app-specific external storage is used instead).
+    private val writeStoragePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* result handled implicitly — CrashReportingManager checks at write time */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -70,6 +76,13 @@ class MainActivity : ComponentActivity() {
         // Request NEARBY_WIFI_DEVICES permission for mDNS service discovery
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             nearbyWifiPermissionLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
+
+        // Request WRITE_EXTERNAL_STORAGE on Android 9 and below so crash reports can be saved
+        // to the public Documents folder on /sdcard. On Android 10+ this is not required.
+        @Suppress("DEPRECATION")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            writeStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
 
         setContent {
