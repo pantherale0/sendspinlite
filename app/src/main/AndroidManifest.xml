@@ -24,6 +24,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SendSpinAndroid"
         android:usesCleartextTraffic="true">
+        <!-- Disable Sentry's auto-init ContentProvider; CrashReportingManager controls init -->
+        <meta-data android:name="io.sentry.auto-init" android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
