@@ -29,6 +29,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val sharedPrefs: SharedPreferences = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /** Whether crash/ANR reporting to Sentry is available (DSN configured at build time). */
+    val isCrashReportingAvailable: Boolean = CrashReportingManager.isCrashReportingAvailable()
+
+    private val _crashReportingEnabled = MutableStateFlow(
+        CrashReportingManager.isCrashReportingEnabled(app)
+    )
+    val crashReportingEnabled: StateFlow<Boolean> = _crashReportingEnabled
+
+    fun setCrashReportingEnabled(enabled: Boolean) {
+        CrashReportingManager.setCrashReportingEnabled(getApplication(), enabled)
+        _crashReportingEnabled.value = enabled
+    }
+
     private val deviceId: String = getOrCreateDeviceId()
 
     data class UiState(

@@ -55,6 +55,16 @@ This project is specially designed for low memory devices and a local network co
   - Memory-aware operation for low-end devices
   - Watchdog monitoring for connection stability
 
+### Crash & ANR Reporting (opt-in)
+- **Privacy-first crash reporting**
+  - Detects hard crashes and App Not Responding (ANR) conditions
+  - On startup after a crash, the app prompts the user to send an anonymous report
+  - Reports are sent to [Sentry](https://sentry.io) only when the user has explicitly enabled the feature
+  - Toggle is available in the **Settings** section of the main screen
+  - No data is ever collected or transmitted unless the user opts in
+  - Sentry is not used for anything other than crash/ANR reporting
+  - Only available in builds where a Sentry DSN has been configured (see [Development](#development-status))
+
 ## Requirements
 
 - **Android**: API 24+ (Android 7.0 and later)
@@ -176,5 +186,19 @@ adb shell am start -n com.sendspinlite/.MainActivity \
 ## Development Status
 
 This project is **functional but experimental**. Contributions and bug reports are welcome.
+
+### Building with Crash Reporting
+
+Crash and ANR reporting via Sentry is **disabled by default** and only activates when:
+1. The build is compiled with a valid Sentry DSN, **and**
+2. The user explicitly enables the feature in the app's Settings section.
+
+To enable crash reporting in your own build, set the `SENTRY_DSN` environment variable before building:
+```bash
+export SENTRY_DSN="https://<key>@<org>.ingest.sentry.io/<project>"
+./gradlew assembleRelease
+```
+
+Without this variable the feature is unavailable (the toggle in Settings will be disabled). Official release builds published by this project include a configured DSN.
 
 ---

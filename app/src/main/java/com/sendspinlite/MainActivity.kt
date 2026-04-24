@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
 private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = false) {
     val ui by vm.ui.collectAsState()
     val discoveredServers by vm.discoveredServers.collectAsState()
+    val crashReportingEnabled by vm.crashReportingEnabled.collectAsState()
     val scrollState = rememberScrollState()
     var showBatteryDialog by remember { mutableStateOf(showBatteryWarning) }
     
@@ -119,6 +120,9 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
     val context = LocalContext.current
     var showExportDialog by remember { mutableStateOf(false) }
     var logExportUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Crash report dialog state
+    var showCrashReportDialog by remember { mutableStateOf(false) }
     
     // Launcher for saving file
     val saveFileLauncher = rememberLauncherForActivityResult(
@@ -168,6 +172,14 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
     // Sync with system volume when UI is shown
     LaunchedEffect(Unit) {
         vm.updateAndroidVolumeState()
+    }
+
+    // Check for a pending crash report from a previous session
+    LaunchedEffect(Unit) {
+        val report = CrashReportingManager.getPendingCrashReport(context)
+        if (report != null) {
+            showCrashReportDialog = true
+        }
     }
 
     @Composable
@@ -410,6 +422,80 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
             )
         }
 
+        // Crash report dialog — shown on startup when a crash was detected in the previous session
+        if (showCrashReportDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    CrashReportingManager.clearPendingCrashReport(context)
+                    showCrashReportDialog = false
+                },
+                title = { Text("App Crash Detected") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (crashReportingEnabled) {
+                            Text(
+                                "Sendspin Lite crashed during the last session. The crash was automatically reported to help improve the app."
+                            )
+                        } else {
+                            Text(
+                                "Sendspin Lite crashed during the last session. Would you like to send an anonymous crash report to help improve the app?"
+                            )
+                            if (!vm.isCrashReportingAvailable) {
+                                Text(
+                                    "Note: Crash reporting is not available in this build.",
+                                    style = MaterialTheme.typography.caption,
+                                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                )
+                            } else {
+                                Text(
+                                    "You can enable automatic crash reporting in the Settings section below.",
+                                    style = MaterialTheme.typography.caption,
+                                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (crashReportingEnabled) {
+                        Button(
+                            onClick = {
+                                CrashReportingManager.clearPendingCrashReport(context)
+                                showCrashReportDialog = false
+                            }
+                        ) {
+                            Text("OK")
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                if (vm.isCrashReportingAvailable) {
+                                    vm.setCrashReportingEnabled(true)
+                                    CrashReportingManager.sendPendingCrashReport(context)
+                                } else {
+                                    CrashReportingManager.clearPendingCrashReport(context)
+                                }
+                                showCrashReportDialog = false
+                            },
+                            enabled = vm.isCrashReportingAvailable
+                        ) {
+                            Text("Send Report")
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            CrashReportingManager.clearPendingCrashReport(context)
+                            showCrashReportDialog = false
+                        }
+                    ) {
+                        Text("Dismiss")
+                    }
+                }
+            )
+        }
+
         // Connection Status
         Text("Connection Status", style = MaterialTheme.typography.h6)
         Card(
@@ -551,6 +637,45 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                             color = MaterialTheme.colors.error
                         )
                     }
+                }
+            }
+        }
+
+        // Settings section
+        Divider()
+        Text("Settings", style = MaterialTheme.typography.h6)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = 2.dp
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                // Crash & ANR reporting opt-in toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Crash & ANR Reporting",
+                            style = MaterialTheme.typography.body2
+                        )
+                        Text(
+                            text = if (vm.isCrashReportingAvailable)
+                                "Send anonymous crash reports to Sentry to help improve the app"
+                            else
+                                "Not available in this build",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                    Switch(
+                        checked = crashReportingEnabled,
+                        onCheckedChange = { vm.setCrashReportingEnabled(it) },
+                        enabled = vm.isCrashReportingAvailable
+                    )
                 }
             }
         }

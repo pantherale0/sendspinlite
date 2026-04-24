@@ -14,6 +14,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
 
     <application
+        android:name=".SendspinApplication"
         android:allowBackup="true"
         android:label="Sendspin PCM Player"
         android:dataExtractionRules="@xml/data_extraction_rules"
