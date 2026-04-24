@@ -137,7 +137,10 @@ object CrashReportingManager {
             }
             else -> context.filesDir
         }
-        dir.mkdirs()
+        if (!dir.exists() && !dir.mkdirs()) {
+            Log.w(TAG, "Could not create crash report directory: ${dir.absolutePath}; falling back to filesDir")
+            return File(context.filesDir, CRASH_REPORT_FILE)
+        }
         return File(dir, CRASH_REPORT_FILE)
     }
 
