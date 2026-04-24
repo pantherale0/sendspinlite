@@ -116,6 +116,8 @@ class SendspinPcmClient(
     private var lastPlaybackHeartbeatMs: Long = 0L
     @Volatile
     private var lastStatsHeartbeatMs: Long = 0L
+    @Volatile
+    private var lastMessageReceivedMs: Long = 0L
 
     @Volatile
     private var enableOpusCodec: Boolean = false
@@ -289,6 +291,7 @@ class SendspinPcmClient(
                 Log.i(tag, "WS open")
                 isConnected.set(true)
                 handshakeComplete = false
+                lastMessageReceivedMs = System.currentTimeMillis()
                 onUiUpdate { it.copy(status = "ws_open", connected = true) }
                 sendClientHello()
             }
@@ -321,6 +324,7 @@ class SendspinPcmClient(
     private fun teardown(status: String) {
         isConnected.set(false)
         handshakeComplete = false
+        lastMessageReceivedMs = 0L
 
         // Stop the playback loop FIRST to prevent further writes to audio buffer
         playoutJob?.cancel()
@@ -1057,6 +1061,7 @@ class SendspinPcmClient(
     }
 
     private fun handleText(text: String) {
+        lastMessageReceivedMs = System.currentTimeMillis()
         try {
             val obj = JSONObject(text)
             val type = obj.optString("type", "")
@@ -1353,6 +1358,7 @@ class SendspinPcmClient(
     }
 
     private fun handleBinary(data: ByteArray) {
+        lastMessageReceivedMs = System.currentTimeMillis()
         if (!handshakeComplete) return
         if (data.isEmpty()) return
 
@@ -1497,19 +1503,31 @@ class SendspinPcmClient(
 
     /**
      * Health check - called by service to determine if client is functioning
-     * Returns true if both playback and stats loops are active (heartbeating)
+     * Returns true if playback/stats loops are active and the server has sent a message recently.
+     * A long silence from the server (> 3 min) while the handshake is complete indicates the
+     * underlying TCP connection has gone silently dead (e.g. battery optimisation, Doze mode,
+     * router reboot) without triggering an OkHttp onFailure/onClosed callback.
      */
     fun isHealthy(): Boolean {
         if (!isConnected.get()) return false
         if (!handshakeComplete) return false
 
         val now = System.currentTimeMillis()
-        val playbackTimeout = 10_000L  // 10 seconds of no heartbeat = unhealthy
-        val statsTimeout = 10_000L
+        val heartbeatTimeout = 10_000L  // 10 seconds of no internal heartbeat = hung loop
+        // Once the handshake is complete the time-sync loop sends client/time every ≤2 s and
+        // the server echoes server/time back. Three minutes of silence is a reliable signal
+        // that the connection is dead even though OkHttp has not (yet) reported a failure.
+        val messageTimeout = 3 * 60 * 1000L  // 3 minutes
 
-        val playbackOk = (now - lastPlaybackHeartbeatMs) <= playbackTimeout
-        val statsOk = (now - lastStatsHeartbeatMs) <= statsTimeout
+        val playbackOk = (now - lastPlaybackHeartbeatMs) <= heartbeatTimeout
+        val statsOk = (now - lastStatsHeartbeatMs) <= heartbeatTimeout
+        val messageOk = lastMessageReceivedMs > 0L && (now - lastMessageReceivedMs) <= messageTimeout
 
-        return playbackOk && statsOk
+        if (!messageOk) {
+            val silenceSeconds = if (lastMessageReceivedMs > 0L) (now - lastMessageReceivedMs) / 1000 else -1L
+            Log.w(tag, "isHealthy: no server message for ${silenceSeconds}s — connection may be silently dead")
+        }
+
+        return playbackOk && statsOk && messageOk
     }
 }
