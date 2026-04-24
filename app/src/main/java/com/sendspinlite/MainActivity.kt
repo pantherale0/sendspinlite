@@ -57,6 +57,13 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* result handled implicitly — CrashReportingManager checks at write time */ }
 
+    // Launched after the user opts in to auto-install updates (Android 8+ only).
+    // The system shows an "Allow from this source" settings screen; the result is ignored
+    // because canRequestPackageInstalls() is checked again at download time.
+    private val installPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { /* result checked via canRequestPackageInstalls() at download time */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -88,9 +95,23 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    PlayerScreen(vm, showBatteryWarning = !shownBatteryWarning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+                    PlayerScreen(
+                        vm,
+                        showBatteryWarning = !shownBatteryWarning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP,
+                        onRequestInstallPermission = { requestInstallPermission() }
+                    )
                 }
             }
+        }
+    }
+
+    /** Direct the user to the "Allow from this source" settings screen (Android 8+). */
+    private fun requestInstallPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            installPermissionLauncher.launch(intent)
         }
     }
 
@@ -119,12 +140,20 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = false) {
+private fun PlayerScreen(
+    vm: PlayerViewModel,
+    showBatteryWarning: Boolean = false,
+    onRequestInstallPermission: () -> Unit = {}
+) {
     val ui by vm.ui.collectAsState()
     val discoveredServers by vm.discoveredServers.collectAsState()
     val crashReportingEnabled by vm.crashReportingEnabled.collectAsState()
+    val updateInfo by vm.updateInfo.collectAsState()
+    val autoUpdateEnabled by vm.autoUpdateEnabled.collectAsState()
     val scrollState = rememberScrollState()
     var showBatteryDialog by remember { mutableStateOf(showBatteryWarning) }
+    // Show auto-update prompt on first launch (if user hasn't been asked yet).
+    var showAutoUpdateDialog by remember { mutableStateOf(!vm.hasAskedAboutAutoUpdate) }
     
     // State for title tap counter (5 taps to export logs)
     var titleTapCount by remember { mutableStateOf(0) }
@@ -509,6 +538,116 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
             )
         }
 
+        // Auto-update first-launch dialog
+        if (showAutoUpdateDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    vm.markAutoUpdateAsked()
+                    showAutoUpdateDialog = false
+                },
+                title = { Text("Automatic Updates") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Would you like Sendspin Lite to automatically check for updates weekly " +
+                            "and download them in the background?"
+                        )
+                        Text(
+                            "If you choose \"Enable Auto-Install\", the app will need permission to " +
+                            "install packages on this device. Choosing \"Just Notify Me\" requires no " +
+                            "extra permissions — the app will show a banner when a new version is available.",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            vm.setAutoUpdateEnabled(true)
+                            showAutoUpdateDialog = false
+                            // On Android 8+ direct the user to allow installs from this source.
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                !context.packageManager.canRequestPackageInstalls()
+                            ) {
+                                onRequestInstallPermission()
+                            }
+                        }
+                    ) {
+                        Text("Enable Auto-Install")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            // Notify only – no install permission required.
+                            vm.markAutoUpdateAsked()
+                            showAutoUpdateDialog = false
+                        }
+                    ) {
+                        Text("Just Notify Me")
+                    }
+                }
+            )
+        }
+
+        // Update available banner
+        updateInfo?.let { info ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = 4.dp,
+                backgroundColor = MaterialTheme.colors.primaryVariant
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Update Available: ${info.tagName}",
+                        style = MaterialTheme.typography.subtitle1,
+                        color = MaterialTheme.colors.onPrimary
+                    )
+                    if (info.apkUrl != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { vm.downloadUpdate(info) },
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = MaterialTheme.colors.onPrimary,
+                                    contentColor = MaterialTheme.colors.primaryVariant
+                                )
+                            ) {
+                                Text("Download & Install")
+                            }
+                            TextButton(onClick = { vm.dismissUpdate() }) {
+                                Text(
+                                    "Dismiss",
+                                    color = MaterialTheme.colors.onPrimary
+                                )
+                            }
+                        }
+                    } else {
+                        // No APK attached – direct user to the release page.
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = {
+                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(info.releaseUrl))
+                                    context.startActivity(browserIntent)
+                                }
+                            ) {
+                                Text(
+                                    "View Release",
+                                    color = MaterialTheme.colors.onPrimary
+                                )
+                            }
+                            TextButton(onClick = { vm.dismissUpdate() }) {
+                                Text(
+                                    "Dismiss",
+                                    color = MaterialTheme.colors.onPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Connection Status
         Text("Connection Status", style = MaterialTheme.typography.h6)
         Card(
@@ -688,6 +827,40 @@ private fun PlayerScreen(vm: PlayerViewModel, showBatteryWarning: Boolean = fals
                         checked = crashReportingEnabled,
                         onCheckedChange = { vm.setCrashReportingEnabled(it) },
                         enabled = vm.isCrashReportingAvailable
+                    )
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+                // Auto-update toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Auto-Install Updates",
+                            style = MaterialTheme.typography.body2
+                        )
+                        Text(
+                            text = "Automatically download and install new releases from GitHub",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                    Switch(
+                        checked = autoUpdateEnabled,
+                        onCheckedChange = { enabled ->
+                            vm.setAutoUpdateEnabled(enabled)
+                            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                !context.packageManager.canRequestPackageInstalls()
+                            ) {
+                                onRequestInstallPermission()
+                            }
+                        }
                     )
                 }
             }
