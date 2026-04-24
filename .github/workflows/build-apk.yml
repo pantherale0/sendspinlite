@@ -32,6 +32,8 @@ jobs:
         run: chmod +x gradlew
         
       - name: Build APK (Debug)
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: ./gradlew assembleDebug
         
       - name: Extract version from build.gradle.kts
