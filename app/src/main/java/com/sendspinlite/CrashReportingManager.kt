@@ -117,7 +117,7 @@ object CrashReportingManager {
         }
         SentryAndroid.init(context) { options: SentryAndroidOptions ->
             options.dsn = dsn
-            options.isEnableAutoSessionTracking = false   // session tracking is opt-out by default; disabled for privacy
+            options.isEnableAutoSessionTracking = false   // Disable session tracking for privacy
             options.isAnrEnabled = true                   // detect ANR (App Not Responding) events
             options.isAttachScreenshot = false            // do not capture screenshots
             options.isSendDefaultPii = false              // no PII
@@ -163,7 +163,8 @@ object CrashReportingManager {
         // Collect recent logcat output to include with the report
         try {
             val process = Runtime.getRuntime().exec("logcat -d -t 200")
-            val logs = process.inputStream.bufferedReader().readText()
+            val logs = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
             process.destroy()
             sb.appendLine()
             sb.appendLine("=== Recent Logcat (last 200 lines) ===")
