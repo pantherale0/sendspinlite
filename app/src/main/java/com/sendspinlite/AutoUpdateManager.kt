@@ -7,9 +7,11 @@ import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -209,14 +211,16 @@ object AutoUpdateManager {
     /**
      * Trigger the system APK install UI for a completed download.
      *
-     * On Android 7+ (API 24+) DownloadManager returns a `content://` URI that the system
-     * install activity can read directly; no additional FileProvider setup is required.
+     * [DownloadManager.COLUMN_LOCAL_URI] returns a `file://` URI.  On Android 7+ (API 24+)
+     * passing a `file://` URI to another process via an Intent throws
+     * [android.os.FileUriExposedException], so we convert it to a `content://` URI using
+     * [FileProvider] before building the install intent.
      */
     fun installDownloadedApk(context: Context, downloadId: Long) {
         try {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val query = DownloadManager.Query().setFilterById(downloadId)
-            val localUri = dm.query(query).use { cursor ->
+            val localUriString = dm.query(query).use { cursor ->
                 if (!cursor.moveToFirst()) {
                     Log.w(TAG, "Download ID $downloadId not found in DownloadManager")
                     return
@@ -231,7 +235,18 @@ object AutoUpdateManager {
                 cursor.getString(uriCol)
             }
 
-            val apkUri = Uri.parse(localUri)
+            // COLUMN_LOCAL_URI is a file:// URI; convert to content:// via FileProvider so
+            // the installer activity (in another process) can read the file on API 24+.
+            val filePath = Uri.parse(localUriString).path ?: run {
+                Log.e(TAG, "Could not resolve local file path from URI: $localUriString")
+                return
+            }
+            val localFile = File(filePath)
+            val apkUri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                localFile
+            )
             val installIntent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
