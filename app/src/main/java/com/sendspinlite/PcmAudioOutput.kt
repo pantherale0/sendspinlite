@@ -12,6 +12,11 @@ import java.util.concurrent.atomic.AtomicLong
 class PcmAudioOutput {
     private val tag = "PcmAudioOutput"
 
+    companion object {
+        /** Safety ceiling for pipeline latency estimation (2 seconds). */
+        private const val MAX_PIPELINE_LATENCY_US = 2_000_000L
+    }
+
     @Volatile
     private var track: AudioTrack? = null
     private val started = AtomicBoolean(false)
@@ -316,8 +321,11 @@ class PcmAudioOutput {
 
     /**
      * Estimated pipeline latency from AudioTrack write to speaker output (microseconds).
-     * Uses dynamic queue depth (written frames - played frames) with smoothing,
-     * and never goes below HAL minimum-buffer latency floor.
+     * Prefers AudioTimestamp (which captures DSP and hardware-buffer latency that
+     * playbackHeadPosition misses on devices such as Amazon Echo Show 8 running LineageOS
+     * (android_device_amazon_crown)),
+     * falling back to playbackHeadPosition when a timestamp is unavailable.
+     * No fixed 250 ms upper cap: high-latency devices are reported accurately.
      */
     fun getEstimatedPipelineLatencyUs(): Long {
         val bytesPerFrame = currentChannels * (currentBitDepth / 8)
@@ -336,17 +344,38 @@ class PcmAudioOutput {
             val trackRef = track ?: return floorUs
             if (trackRef.state != AudioTrack.STATE_INITIALIZED) return floorUs
 
+            // Always update playback-head state so the wrap counter stays consistent
+            // even when AudioTimestamp is used as the primary measurement.
             val raw = trackRef.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
             if (raw < playbackHeadRaw) {
                 playbackHeadWraps++
             }
             playbackHeadRaw = raw
-
             val playedFrames = raw + (playbackHeadWraps shl 32)
-            val writtenFrames = totalFramesWritten.get()
-            val queuedFrames = (writtenFrames - playedFrames).coerceAtLeast(0L)
 
-            val dynamicUs = (queuedFrames * 1_000_000L) / currentSampleRate.toLong()
+            val writtenFrames = totalFramesWritten.get()
+
+            // Prefer AudioTimestamp: it captures DSP / HAL / hardware-buffer latency that
+            // playbackHeadPosition misses on devices like Amazon Echo Show 8 running LineageOS
+            // (android_device_amazon_crown).
+            val audioTimestamp = AudioTimestamp()
+            val dynamicUs: Long = if (trackRef.getTimestamp(audioTimestamp) &&
+                audioTimestamp.nanoTime != 0L
+            ) {
+                val nowNs = System.nanoTime()
+                // Extrapolate the presented-frame position from the timestamp instant to now.
+                val elapsedNs = (nowNs - audioTimestamp.nanoTime).coerceAtLeast(0L)
+                val framesElapsed =
+                    (elapsedNs.toDouble() * currentSampleRate / 1_000_000_000.0).toLong()
+                val currentPresentedFrames = audioTimestamp.framePosition + framesElapsed
+                val framesInFlight = (writtenFrames - currentPresentedFrames).coerceAtLeast(0L)
+                framesInFlight * 1_000_000L / currentSampleRate.toLong()
+            } else {
+                // Fallback: derive latency from the software playback-head position only.
+                val queuedFrames = (writtenFrames - playedFrames).coerceAtLeast(0L)
+                (queuedFrames * 1_000_000L) / currentSampleRate.toLong()
+            }
+
             val combinedUs = max(dynamicUs, floorUs)
 
             smoothedLatencyUs = if (smoothedLatencyUs == 0L) {
@@ -356,7 +385,10 @@ class PcmAudioOutput {
                 ((smoothedLatencyUs * 7L) + (combinedUs * 3L)) / 10L
             }
 
-            return smoothedLatencyUs.coerceIn(20_000L, 250_000L)
+            // No fixed 250 ms upper cap: allow accurate reporting for high-latency devices
+            // (e.g. Amazon Echo Show 8 running LineageOS, which can have 700 ms+ pipeline latency).
+            // MAX_PIPELINE_LATENCY_US guards against completely unrealistic values.
+            return smoothedLatencyUs.coerceIn(20_000L, MAX_PIPELINE_LATENCY_US)
         }
     }
 

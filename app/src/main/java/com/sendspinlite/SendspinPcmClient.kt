@@ -930,52 +930,63 @@ class SendspinPcmClient(
                 val now = nowUs()
                 val earlyUs = localPlayUs - now
 
+                // Server-time lateness: how many ms the chunk is past its server timestamp.
+                // Positive = late; negative = ahead of server time.
+                //
+                // Derivation:
+                //   earlyUs = localPlayUs - now
+                //           = (clock.convertServerToClient(serverTs) + totalPlayoutOffsetUs) - now
+                //   → earlyUs - totalPlayoutOffsetUs = clock.convertServerToClient(serverTs) - now
+                //   → -(earlyUs - totalPlayoutOffsetUs) = now - clock.convertServerToClient(serverTs)
+                //                                       ≈ now_server - serverTs   (offset ≈ 0)
+                //
+                // This is independent of staticDelayUs and playoutOffsetUs, so threshold
+                // checks based on it work correctly even when the server has applied a large
+                // static delay (e.g. 754 ms on Echo Show 8) that would otherwise make earlyUs
+                // permanently very negative and trigger false audio-cut / catch-up events.
+                val serverLatenessMs = -(earlyUs - totalPlayoutOffsetUs) / 1000L
+
                 if (forceResyncMode) {
                     // If still late during forced resync, drop to near-live instead of gradually drifting.
-                    if (earlyUs < -80_000L) {
+                    // Compare against server-time lateness so that devices with large staticDelayMs
+                    // or pipeline offset don't spuriously discard all buffered audio.
+                    if (serverLatenessMs > 80L) {
                         val dropped = jitter.dropWhileLate(nowUs(), 30_000L)
                         if (dropped > 0) {
                             val nowMs = System.currentTimeMillis()
                             if (nowMs - lastForceResyncLogMs >= 1000L) {
                                 lastForceResyncLogMs = nowMs
-                                Log.w(tag, "force-resync runtime: dropped=$dropped early=${earlyUs / 1000}ms")
+                                Log.w(tag, "force-resync runtime: dropped=$dropped serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")
                             }
                         }
                         continue
                     }
 
-                    // Exit resync mode once we're near target timing or timeout expires.
-                    if (earlyUs in -40_000L..120_000L || nowUs() >= forceResyncUntilUs) {
+                    // Exit resync mode once the chunk is near (or ahead of) server time, or timeout expires.
+                    if (serverLatenessMs < 40L || nowUs() >= forceResyncUntilUs) {
                         forceResyncMode = false
                         forceResyncUntilUs = 0L
-                        Log.i(tag, "force-resync complete: early=${earlyUs / 1000}ms")
+                        Log.i(tag, "force-resync complete: serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")
                     }
                 }
 
-                // NEW: Aggressive audio cut on extreme late drops
-                // Instead of relying on slow playback speed adjustment (1.002x), 
-                // cut audio when it falls too far behind and resync to catch up quickly.
-                // This prevents audible gaps and keeps group sync tight.
-                val earlyMs = earlyUs / 1000L
+                // Aggressive audio cut when audio falls too far behind server time.
+                // Uses server-time lateness instead of earlyMs so that a large staticDelayMs
+                // (e.g. 754 ms set by the server for Echo Show 8) does not cause continuous
+                // false-positive cuts that produce the buffer-drain / drop cycle.
                 val nowMs = System.currentTimeMillis()
                 val timeSinceLastCutMs = nowMs - lastAudioCutMs
 
-                if (!forceResyncMode && earlyMs < -audioOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
-                    // Audio is >150ms late (too far behind to catch up with playback speed adjustment alone)
+                if (!forceResyncMode && serverLatenessMs > audioOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
                     val snapBeforeCut = jitter.snapshot()
                     val lateDropsCount = snapBeforeCut.lateDrops
-                    
-                    // Trigger aggressive resync: cut and drop old audio
                     Log.w(
                         tag,
-                        "audio-cut triggered: too far behind (early=${earlyMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing."
+                        "audio-cut triggered: too far behind (serverLate=${serverLatenessMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing."
                     )
-                    
-                    // Stop playback, flush buffer, and resync
                     output.stop()
                     triggerForceResync("audio_out_of_sync_late_drop")
                     lastAudioCutMs = nowMs
-                    
                     val backoffNowUs = nowUs()
                     nextStartAttemptUs = backoffNowUs + 500_000L  // Delay 500ms before restart attempt
                     continue
@@ -984,14 +995,17 @@ class SendspinPcmClient(
                 // Debug: log first few scheduling attempts
                 if (audioScheduleDebugCount < 3) {
                     audioScheduleDebugCount++
-                    Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs/1000}ms playout=${totalPlayoutOffsetUs/1000}ms")
+                    Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs/1000}ms serverLate=${serverLatenessMs}ms playout=${totalPlayoutOffsetUs/1000}ms")
                 }
 
-                // If we're behind by a lot, drop chunks to catch up (audible effect).
-                if (earlyUs < -dropLateUs) {
+                // If we're behind by a lot in server time, drop chunks to catch up (audible effect).
+                // Use server-time lateness so a large staticDelayMs does not trigger spurious catch-up.
+                val dropLateThresholdMs = dropLateUs / 1000L
+                if (serverLatenessMs > dropLateThresholdMs) {
                     var dropped = 1
                     val maxDrops = 50  // Prevent unbounded dropping that causes ANR
                     val catchupStart = nowUs()
+                    val targetLateThresholdMs = targetLateUs / 1000L
                     while (dropped < maxDrops) {
                         val next = jitter.pollPlayable(nowUs(), Long.MAX_VALUE) ?: break
                         val nextPcm = if (codec == "opus") {
@@ -1008,8 +1022,10 @@ class SendspinPcmClient(
                         val nextLocalPlayUs =
                             clock.convertServerToClient(next.serverTimestampUs) + nextTotalPlayoutOffsetUs
                         val nextEarlyUs = nextLocalPlayUs - nowUs()
+                        // Server-time lateness for the candidate chunk
+                        val nextServerLatenessMs = -(nextEarlyUs - nextTotalPlayoutOffsetUs) / 1000L
                         dropped++
-                        if (nextEarlyUs >= -targetLateUs) {
+                        if (nextServerLatenessMs <= targetLateThresholdMs) {
                             if (nextPcm.isNotEmpty()) {
                                 val ok = output.writePcm(nextPcm)
                                 if (!ok) {
