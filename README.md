@@ -2,7 +2,7 @@
 
 A basic Android client for [Sendspin](https://github.com/sendspin) that provides synchronized network audio playback. It connects to a Sendspin-compatible server (e.g., Home Assistant) over WebSocket, receives timestamped PCM or Opus audio frames, performs clock synchronization and jitter buffering, and plays audio in tight sync with other devices.
 
-This project is specially designed for low memory devices and a local network connection only. Connections via cellular will not be supported. The client is design to offer only a Sendspin player.
+This project is specially designed for low memory devices and a local network connection only. Connections via cellular will not be supported. The client is designed to offer only a Sendspin player.
 
 ## Features
 
@@ -58,16 +58,16 @@ This project is specially designed for low memory devices and a local network co
 ### Crash & ANR Reporting (opt-in)
 - **Privacy-first crash reporting**
   - Detects hard crashes and App Not Responding (ANR) conditions
-  - On startup after a crash, the app prompts the user to send an anonymous report
-  - Reports are sent to [Sentry](https://sentry.io) only when the user has explicitly enabled the feature
+  - On startup after a crash, the app prompts to send an anonymous report
+  - Reports are sent to [Sentry](https://sentry.io) only when the feature is explicitly enabled (opt-in)
   - Toggle is available in the **Settings** section of the main screen
-  - No data is ever collected or transmitted unless the user opts in
-  - Sentry is not used for anything other than crash/ANR reporting
+  - No data is ever collected or transmitted unless opted-in
+  - Sentry is not used for anything other than reports for crashes/ANR or audio issues (triggered manually by pressing the dedicated button)
   - Only available in builds where a Sentry DSN has been configured (see [Development](#development-status))
 
 ## Requirements
 
-- **Android**: API 24+ (Android 7.0 and later)
+- **Android**: API 24+ (Android 7.0 and later), in theory this could be dropped to 21, however this app relies on `AudioTrack` to play audio streams and a number of required sync features are unavailable prior to Android 7.0.
 - **Permissions**: 
   - `INTERNET` - WebSocket communication
   - `MODIFY_AUDIO_SETTINGS` - Audio playback control
@@ -77,7 +77,7 @@ This project is specially designed for low memory devices and a local network co
   - `NEARBY_WIFI_DEVICES` - mDNS service discovery (Android 12+)
   - `RECEIVE_BOOT_COMPLETED` - Auto-start on device boot
   - `ACCESS_NETWORK_STATE`, `CHANGE_NETWORK_STATE` - Network monitoring
-- **Server**: Sendspin-compatible server (e.g., Home Assistant with Sendspin integration)
+- **Server**: Sendspin-compatible server (e.g., Music Assistant)
 
 ## Getting Started
 
@@ -98,15 +98,6 @@ This project is specially designed for low memory devices and a local network co
 
 The app supports launch parameters for programmatic configuration:
 
-#### `playoutOffsetMs` (Long, optional - Deprecated)
-- Sets the initial playout offset in milliseconds
-- **Note**: Playback timing is now automatically managed by the adaptive playback speed adjustment loop, which continuously adjusts playback speed (0.998x-1.002x) based on buffer-ahead measurements. Manual offset adjustments are generally unnecessary and may conflict with automatic timing control. This parameter is maintained for backwards compatibility only.
-- Legacy range: -1000ms to +1000ms
-- Example (use 0 for no manual offset):
-  ```bash
-  adb shell am start -n com.sendspinlite/.MainActivity --el playoutOffsetMs 0
-  ```
-
 #### `enableOpusCodec` (Boolean, optional)
 - Enables Opus codec support
 - `true`: Opus offered as preferred codec (PCM as fallback)
@@ -116,13 +107,6 @@ The app supports launch parameters for programmatic configuration:
   ```bash
   adb shell am start -n com.sendspinlite/.MainActivity --ez enableOpusCodec true
   ```
-
-#### Combined Example
-```bash
-adb shell am start -n com.sendspinlite/.MainActivity \
-  --el playoutOffsetMs 0 \
-  --ez enableOpusCodec true
-```
 
 ## Architecture
 
@@ -185,7 +169,7 @@ adb shell am start -n com.sendspinlite/.MainActivity \
 
 ## Development Status
 
-This project is **functional but experimental**. Contributions and bug reports are welcome.
+This project is **stable**. Contributions and bug reports are welcome.
 
 ### Reporting Audio / Playback Issues
 
