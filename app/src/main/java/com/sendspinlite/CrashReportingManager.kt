@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.util.Log
+import io.sentry.Attachment
+import io.sentry.Hint
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryLevel
@@ -90,12 +92,14 @@ object CrashReportingManager {
             val event = SentryEvent().apply {
                 level = SentryLevel.FATAL
                 message = io.sentry.protocol.Message().apply { message = "Crash report" }
-                setExtra("crash_report", report)
+                setExtra("crash_report_tail", lastLines(report, 50))
                 setExtra("app_version", BuildConfig.VERSION_NAME)
                 setExtra("android_version", Build.VERSION.RELEASE)
                 setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
             }
-            Sentry.captureEvent(event)
+            val hint = Hint()
+            hint.addAttachment(Attachment(report.toByteArray(Charsets.UTF_8), "crash_report.txt", "text/plain"))
+            Sentry.captureEvent(event, hint)
             Log.i(TAG, "Pending crash report sent to Sentry")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send crash report: ${e.message}")

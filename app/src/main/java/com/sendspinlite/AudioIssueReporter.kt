@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider
+import io.sentry.Attachment
+import io.sentry.Hint
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.protocol.SentryId
@@ -131,12 +133,14 @@ object AudioIssueReporter {
             val event = SentryEvent().apply {
                 level = SentryLevel.WARNING
                 message = io.sentry.protocol.Message().apply { message = "Audio issue report" }
-                setExtra("audio_report", report)
+                setExtra("audio_report_tail", lastLines(report, 50))
                 setExtra("app_version", BuildConfig.VERSION_NAME)
                 setExtra("android_version", Build.VERSION.RELEASE)
                 setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
             }
-            val id: SentryId = Sentry.captureEvent(event)
+            val hint = Hint()
+            hint.addAttachment(Attachment(report.toByteArray(Charsets.UTF_8), "audio_report.txt", "text/plain"))
+            val id: SentryId = Sentry.captureEvent(event, hint)
             val idStr = id.toString()
             // SentryId.EMPTY_ID represents a failed / no-op capture
             if (idStr == SentryId.EMPTY_ID.toString()) null else idStr
