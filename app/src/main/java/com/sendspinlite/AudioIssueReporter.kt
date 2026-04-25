@@ -7,7 +7,7 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import io.sentry.Sentry
 import io.sentry.SentryEvent
-import io.sentry.SentryId
+import io.sentry.protocol.SentryId
 import io.sentry.SentryLevel
 import java.io.File
 import java.text.SimpleDateFormat
