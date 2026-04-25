@@ -1,0 +1,163 @@
+package com.sendspinlite
+
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.util.Log
+import androidx.core.content.FileProvider
+import io.sentry.Sentry
+import io.sentry.SentryEvent
+import io.sentry.SentryId
+import io.sentry.SentryLevel
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Collects and reports audio/playback issue diagnostics.
+ *
+ * Privacy: Only data relevant to diagnosing audio pipeline issues is included.
+ * Personally-identifiable or content-related information (server URL/IP address,
+ * client name, group name, and track metadata such as title/artist/album) is
+ * intentionally excluded so that the report contains no personal data.
+ */
+object AudioIssueReporter {
+
+    private const val TAG = "AudioIssueReporter"
+    private const val REPORT_FILE = "sendspin_audio_report.txt"
+
+    /**
+     * Build a privacy-redacted diagnostics report focused on the audio pipeline.
+     *
+     * Included: Android version, device model, app version, audio configuration,
+     *           audio statistics, network quality metrics, and logcat lines from
+     *           audio-related tags only.
+     *
+     * Excluded: server URL/IP address, client name, group name, and all track
+     *           metadata (title, artist, album, year, track number, artwork URL).
+     */
+    fun buildReport(uiState: PlayerViewModel.UiState): String {
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        val sb = StringBuilder()
+
+        sb.appendLine("=== Sendspin Lite Audio Issue Report ===")
+        sb.appendLine("Timestamp   : $timestamp")
+        sb.appendLine("App Version : ${BuildConfig.VERSION_NAME}")
+        sb.appendLine("Android     : ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+        sb.appendLine("Device      : ${Build.MANUFACTURER} ${Build.MODEL}")
+        sb.appendLine("========================================")
+        sb.appendLine()
+
+        // Audio configuration (no PII — codec choice, delay and speed are pipeline settings)
+        sb.appendLine("=== AUDIO CONFIGURATION ===")
+        sb.appendLine("Codec             : ${if (uiState.enableOpusCodec) "Opus" else "PCM"}")
+        sb.appendLine("Static Delay      : ${uiState.staticDelayMs} ms")
+        sb.appendLine("Playback Speed    : ${"%.3f".format(uiState.playbackSpeedMultiplier)}x")
+        sb.appendLine("Low Memory Device : ${uiState.isLowMemoryDevice}")
+        sb.appendLine("Is TV             : ${uiState.isTV}")
+        sb.appendLine()
+
+        // Connection / network — type and quality are useful for audio debugging;
+        // the server address, client name and group name are intentionally omitted.
+        sb.appendLine("=== CONNECTION / NETWORK ===")
+        sb.appendLine("Status           : ${uiState.status}")
+        sb.appendLine("Connected        : ${uiState.connected}")
+        sb.appendLine("Connection Type  : ${uiState.connectionType}")
+        sb.appendLine("Network Quality  : ${uiState.networkQuality}")
+        sb.appendLine("Stability        : ${uiState.stability}")
+        sb.appendLine("Connection Drops : ${uiState.connectionDrops}")
+        sb.appendLine("Active Roles     : ${uiState.activeRoles.ifBlank { "-" }}")
+        sb.appendLine()
+
+        // Audio pipeline statistics
+        sb.appendLine("=== AUDIO PIPELINE STATISTICS ===")
+        sb.appendLine("Playback State    : ${uiState.playbackState.ifBlank { "-" }}")
+        sb.appendLine("Stream Format     : ${uiState.streamDesc.ifBlank { "-" }}")
+        sb.appendLine("Smoothed Latency  : ${"%.1f".format(uiState.smoothedLatencyMs)} ms")
+        sb.appendLine("Sync Uncertainty  : ±${"%.3f".format(uiState.offsetUncertaintyUs / 1000.0)} ms")
+        sb.appendLine("Drift             : ${"%.3f".format(uiState.driftPpm)} ppm")
+        sb.appendLine("Drift Uncertainty : ${"%.3f".format(uiState.driftUncertaintyPpm)} ppm")
+        sb.appendLine("Drift SNR         : ${"%.2f".format(uiState.driftSnr)}")
+        sb.appendLine("RTT               : ${"%.2f".format(uiState.rttUs / 1000.0)} ms")
+        sb.appendLine("Queued Chunks     : ${uiState.queuedChunks}")
+        sb.appendLine("Buffer Ahead      : ${uiState.bufferAheadMs} ms")
+        sb.appendLine("Late Drops        : ${uiState.lateDrops}")
+        sb.appendLine("Audible Syncs     : ${uiState.audibleSyncCount}")
+        sb.appendLine("Kalman Errors     : ${uiState.kalmanErrorCount}")
+        sb.appendLine()
+
+        // Logcat filtered to audio-related tags only.
+        // The *:S wildcard silences all other tags so only Sendspin and Android
+        // audio subsystem lines are included.
+        sb.appendLine("=== AUDIO LOGCAT (filtered) ===")
+        try {
+            val process = Runtime.getRuntime().exec(
+                arrayOf(
+                    "logcat", "-d", "-t", "500",
+                    "SendspinPcmClient:V",
+                    "PlayerViewModel:V",
+                    "CrashReportingManager:V",
+                    "AudioIssueReporter:V",
+                    "AudioTrack:V",
+                    "AudioRecord:V",
+                    "AudioFlinger:V",
+                    "AudioPolicyManager:V",
+                    "*:S"
+                )
+            )
+            val logs = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+            process.destroy()
+            sb.appendLine(logs)
+        } catch (e: Exception) {
+            sb.appendLine("(logcat unavailable: ${e.message})")
+        }
+
+        return sb.toString()
+    }
+
+    /**
+     * Upload [report] to Sentry as a WARNING-level event and return the Sentry
+     * event ID (a UUID string) on success, or `null` if Sentry is not available /
+     * not initialised / the upload fails.
+     *
+     * The caller is responsible for ensuring that Sentry has been initialised
+     * (i.e. crash reporting is enabled) before calling this method.
+     */
+    fun uploadToSentry(report: String): String? {
+        if (!CrashReportingManager.isCrashReportingAvailable()) return null
+        return try {
+            val event = SentryEvent().apply {
+                level = SentryLevel.WARNING
+                message = io.sentry.protocol.Message().apply { message = "Audio issue report" }
+                setExtra("audio_report", report)
+                setExtra("app_version", BuildConfig.VERSION_NAME)
+                setExtra("android_version", Build.VERSION.RELEASE)
+                setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+            }
+            val id: SentryId = Sentry.captureEvent(event)
+            val idStr = id.toString()
+            // SentryId.EMPTY_ID represents a failed / no-op capture
+            if (idStr == SentryId.EMPTY_ID.toString()) null else idStr
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to upload audio issue to Sentry: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Write [report] to a private cache file and return a shareable content [Uri]
+     * (via [FileProvider]), or `null` on failure.
+     */
+    fun saveReportToFile(context: Context, report: String): Uri? {
+        return try {
+            val file = File(context.filesDir, REPORT_FILE)
+            file.writeText(report)
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save audio report: ${e.message}")
+            null
+        }
+    }
+}

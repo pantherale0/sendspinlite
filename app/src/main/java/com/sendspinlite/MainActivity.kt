@@ -40,6 +40,9 @@ import androidx.core.content.edit
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val vm: PlayerViewModel by viewModels()
@@ -165,6 +168,13 @@ private fun PlayerScreen(
 
     // Crash report dialog state
     var showCrashReportDialog by remember { mutableStateOf(false) }
+
+    // Audio issue reporting state
+    var showAudioIssueDialog by remember { mutableStateOf(false) }
+    var showAudioIssueResultDialog by remember { mutableStateOf(false) }
+    var audioIssueSentryEventId by remember { mutableStateOf<String?>(null) }
+    var isCollectingAudioReport by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     
     // Launcher for saving file
     val saveFileLauncher = rememberLauncherForActivityResult(
@@ -183,6 +193,25 @@ private fun PlayerScreen(
                 }
             } catch (e: Exception) {
                 Log.e("MainActivity", "Error exporting logs: ${e.message}")
+            }
+        }
+    }
+
+    // Launcher for saving the audio issue report to a user-chosen location
+    val audioReportSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    val reportFile = File(context.filesDir, "sendspin_audio_report.txt")
+                    if (reportFile.exists()) {
+                        reportFile.inputStream().use { input -> input.copyTo(output) }
+                        Log.i("MainActivity", "Audio report saved to $uri")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error saving audio report: ${e.message}")
             }
         }
     }
@@ -298,11 +327,26 @@ private fun PlayerScreen(
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            "Sendspin Lite Player",
-            style = MaterialTheme.typography.h5,
-            modifier = Modifier.clickable { handleTitleTap() }
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Sendspin Lite Player",
+                style = MaterialTheme.typography.h5,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { handleTitleTap() }
+            )
+            IconButton(onClick = { showAudioIssueDialog = true }) {
+                Icon(
+                    imageVector = Icons.Filled.BugReport,
+                    contentDescription = "Report audio issue",
+                    tint = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                )
+            }
+        }
 
         // Show discovery status or manual entry prompt
         if (!ui.connected) {
@@ -458,6 +502,159 @@ private fun PlayerScreen(
                     Button(
                         onClick = { showExportDialog = false }
                     ) {
+                        Text("OK")
+                    }
+                }
+            )
+        }
+
+        // Audio issue report — collecting/uploading progress indicator
+        if (isCollectingAudioReport) {
+            AlertDialog(
+                onDismissRequest = { /* non-dismissable while collecting */ },
+                title = { Text("Collecting Audio Diagnostics…") },
+                text = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Text("Please wait while audio diagnostics are collected.")
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+
+        // Audio issue report — choose action dialog
+        if (showAudioIssueDialog) {
+            AlertDialog(
+                onDismissRequest = { showAudioIssueDialog = false },
+                title = { Text("Report Audio Issue") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "This collects audio diagnostics to help identify the issue. " +
+                            "No personal data, server addresses, or track metadata is included."
+                        )
+                        if (vm.isCrashReportingAvailable && !crashReportingEnabled) {
+                            Text(
+                                "Enable crash & ANR reporting in Settings to also upload reports directly to Sentry.",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (vm.isCrashReportingAvailable && crashReportingEnabled) {
+                        Button(
+                            onClick = {
+                                showAudioIssueDialog = false
+                                isCollectingAudioReport = true
+                                scope.launch(Dispatchers.IO) {
+                                    val report = AudioIssueReporter.buildReport(ui)
+                                    val eventId = AudioIssueReporter.uploadToSentry(report)
+                                    withContext(Dispatchers.Main) {
+                                        audioIssueSentryEventId = eventId
+                                        isCollectingAudioReport = false
+                                        showAudioIssueResultDialog = true
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Upload to Sentry")
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                showAudioIssueDialog = false
+                                isCollectingAudioReport = true
+                                scope.launch(Dispatchers.IO) {
+                                    val report = AudioIssueReporter.buildReport(ui)
+                                    AudioIssueReporter.saveReportToFile(context, report)
+                                    withContext(Dispatchers.Main) {
+                                        isCollectingAudioReport = false
+                                        val timestamp = SimpleDateFormat(
+                                            "yyyy-MM-dd_HH-mm-ss", Locale.getDefault()
+                                        ).format(Date())
+                                        audioReportSaveLauncher.launch(
+                                            "sendspin_audio_report_$timestamp.txt"
+                                        )
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Save to File")
+                        }
+                    }
+                },
+                dismissButton = {
+                    if (vm.isCrashReportingAvailable && crashReportingEnabled) {
+                        TextButton(
+                            onClick = {
+                                showAudioIssueDialog = false
+                                isCollectingAudioReport = true
+                                scope.launch(Dispatchers.IO) {
+                                    val report = AudioIssueReporter.buildReport(ui)
+                                    AudioIssueReporter.saveReportToFile(context, report)
+                                    withContext(Dispatchers.Main) {
+                                        isCollectingAudioReport = false
+                                        val timestamp = SimpleDateFormat(
+                                            "yyyy-MM-dd_HH-mm-ss", Locale.getDefault()
+                                        ).format(Date())
+                                        audioReportSaveLauncher.launch(
+                                            "sendspin_audio_report_$timestamp.txt"
+                                        )
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Save to File")
+                        }
+                    } else {
+                        TextButton(onClick = { showAudioIssueDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                }
+            )
+        }
+
+        // Audio issue report — result dialog (shown after Sentry upload)
+        if (showAudioIssueResultDialog) {
+            AlertDialog(
+                onDismissRequest = { showAudioIssueResultDialog = false },
+                title = { Text("Audio Report Uploaded") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (audioIssueSentryEventId != null) {
+                            Text("The audio diagnostics report has been uploaded to Sentry.")
+                            Text(
+                                "Event ID:",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            )
+                            Text(
+                                audioIssueSentryEventId!!,
+                                style = MaterialTheme.typography.body2.copy(
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                            )
+                            Text(
+                                "Include this event ID in your GitHub issue so the report can be located.",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            )
+                        } else {
+                            Text(
+                                "The upload failed. Please save the report to a file and attach it to your GitHub issue instead."
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { showAudioIssueResultDialog = false }) {
                         Text("OK")
                     }
                 }
