@@ -187,6 +187,25 @@ adb shell am start -n com.sendspinlite/.MainActivity \
 
 This project is **functional but experimental**. Contributions and bug reports are welcome.
 
+### Reporting Audio / Playback Issues
+
+Tap the **bug-report icon** (🐛) next to the app title to open the audio issue reporter.
+It collects a privacy-redacted diagnostics snapshot that includes:
+
+- Audio configuration (codec, static delay, playback speed)
+- Audio pipeline statistics (latency, drift, RTT, buffer, sync counts)
+- Network quality metrics (connection type, stability)
+- Recent logcat lines filtered to Sendspin and Android audio subsystem tags only
+
+**Personal data is intentionally excluded**: server addresses, client/group names, and all track metadata (title, artist, album, etc.) are never collected.
+
+Two reporting options are offered:
+
+| Option | When available | Notes |
+|--------|----------------|-------|
+| **Upload to Sentry** | Crash & ANR reporting enabled in Settings | Returns a unique event ID to include in GitHub issues |
+| **Save to File** | Always | System file picker lets you choose where to save the `.txt` report |
+
 ### Building with Crash Reporting
 
 Crash and ANR reporting via Sentry is **disabled by default** and only activates when:
