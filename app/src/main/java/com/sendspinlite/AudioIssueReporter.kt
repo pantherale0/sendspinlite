@@ -75,7 +75,7 @@ object AudioIssueReporter {
         sb.appendLine("Playback State    : ${uiState.playbackState.ifBlank { "-" }}")
         sb.appendLine("Stream Format     : ${uiState.streamDesc.ifBlank { "-" }}")
         sb.appendLine("Smoothed Latency  : ${"%.1f".format(uiState.smoothedLatencyMs)} ms")
-        sb.appendLine("Sync Uncertainty  : ±${"%.3f".format(uiState.offsetUncertaintyUs / 1000.0)} ms")
+        sb.appendLine("Offset Uncertainty : ±${"%.3f".format(uiState.offsetUncertaintyUs / 1000.0)} ms")
         sb.appendLine("Drift             : ${"%.3f".format(uiState.driftPpm)} ppm")
         sb.appendLine("Drift Uncertainty : ${"%.3f".format(uiState.driftUncertaintyPpm)} ppm")
         sb.appendLine("Drift SNR         : ${"%.2f".format(uiState.driftSnr)}")
