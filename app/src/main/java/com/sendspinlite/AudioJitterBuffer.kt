@@ -27,6 +27,7 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
 
     fun clear() {
         synchronized(q) { q.clear() }
+        lateDropsCounter.set(0L)
     }
 
     fun isEmpty(): Boolean = synchronized(q) { q.isEmpty() }

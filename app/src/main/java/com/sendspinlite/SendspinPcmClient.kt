@@ -22,6 +22,12 @@ class SendspinPcmClient(
     private val tag = "SendspinPcmClient"
 
     companion object {
+        private const val PREFS_NAME = "SendspinPlayerPrefs"
+        private const val KEY_AUDIO_WARMUP_LAST_VERSION_CODE = "audio_warmup_last_version_code"
+        private const val KEY_AUDIO_WARMUP_BASELINE_LATENCY_US = "audio_warmup_baseline_latency_us"
+        private const val KEY_AUDIO_WARMUP_BASELINE_FORMAT = "audio_warmup_baseline_format"
+        private const val KEY_AUDIO_WARMUP_BASELINE_TIMESTAMP_MS = "audio_warmup_baseline_timestamp_ms"
+
         // Shared OkHttpClient to avoid leaking thread pools and connection pools on reconnect
         private val sharedOkHttp = OkHttpClient.Builder()
             .pingInterval(30, TimeUnit.SECONDS)
@@ -126,6 +132,8 @@ class SendspinPcmClient(
 
     private var playAtServerUs: Long = Long.MIN_VALUE
 
+    private val warmupInProgress = AtomicBoolean(false)
+
     // Pipeline delay offset (µs). Compensates for Android audio pipeline latency + codec decode latency.
     // For multi-device sync, tighter offset compensation improves inter-device synchronization.
     // -50ms balances responsiveness with reliable buffer management across varying network conditions
@@ -192,6 +200,13 @@ class SendspinPcmClient(
     private val audioDropDetectionMs = 50L        // If we detect drops and buffer drops below this, prepare for cut
     private val audioResyncTargetMs = 80L         // Target buffer depth after resync
     private var lastAudioCutMs: Long = 0L         // Track when we last cut audio to avoid thrashing
+
+    // Startup protection: avoid aggressive cuts immediately after output start,
+    // and ramp playout offset in to prevent launching too far behind.
+    @Volatile
+    private var outputStartedAtUs: Long = 0L
+    private val startupCutGraceUs = 2_500_000L
+    private val startupPlayoutOffsetRampUs = 2_000_000L
 
     fun getAudibleSyncCount(): Long = audibleSyncCount
     fun getKalmanErrorCount(): Long = kalmanErrorCount
@@ -727,12 +742,108 @@ class SendspinPcmClient(
         }
     }
 
+    private fun getCurrentVersionCode(): Long {
+        return try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to resolve app version code, falling back to BuildConfig", e)
+            BuildConfig.VERSION_CODE.toLong()
+        }
+    }
+
+    private suspend fun runAudioWarmupIfNeeded() {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val currentVersionCode = getCurrentVersionCode()
+        val warmedVersion = prefs.getLong(KEY_AUDIO_WARMUP_LAST_VERSION_CODE, -1L)
+        if (warmedVersion == currentVersionCode) return
+        if (!warmupInProgress.compareAndSet(false, true)) return
+
+        var warmupSucceeded = false
+        var baselineLatencyUs = 0L
+        var selectedFormatText = ""
+
+        try {
+            val selected = output.selectHighestNativePcmFormat(
+                context = context,
+                sampleRateCandidates = listOf(48_000, 44_100),
+                channelCandidates = listOf(2, 1),
+                bitDepthCandidates = listOf(32, 24, 16)
+            ) ?: PcmAudioOutput.PcmFormat(48_000, 2, 16)
+
+            selectedFormatText = "${selected.sampleRate}/${selected.channels}/${selected.bitDepth}"
+            output.start(selected.sampleRate, selected.channels, selected.bitDepth)
+
+            if (!output.isStarted()) {
+                Log.w(tag, "Warmup skipped: output failed to start format=$selectedFormatText")
+                return
+            }
+
+            val bytesPerFrame = selected.channels * (selected.bitDepth / 8)
+            if (bytesPerFrame <= 0) {
+                Log.w(tag, "Warmup aborted: invalid bytesPerFrame for format=$selectedFormatText")
+                return
+            }
+
+            val warmupMs = 250
+            val warmupFrames = (selected.sampleRate * warmupMs) / 1000
+            val silence = ByteArray((warmupFrames * bytesPerFrame).coerceAtLeast(bytesPerFrame * 1024))
+
+            // Completion requirement #1: entire silence payload must be written successfully.
+            val wroteAll = output.writePcm(silence)
+            if (!wroteAll) {
+                Log.w(tag, "Warmup incomplete: silence write did not fully complete format=$selectedFormatText")
+                return
+            }
+
+            // Completion requirement #2: latency must be measured after write.
+            repeat(4) {
+                delay(20)
+                baselineLatencyUs = output.getEstimatedPipelineLatencyUs()
+            }
+
+            if (baselineLatencyUs <= 0L) {
+                Log.w(tag, "Warmup incomplete: latency estimate unavailable format=$selectedFormatText")
+                return
+            }
+
+            warmupSucceeded = true
+        } catch (e: Exception) {
+            Log.w(tag, "Audio warmup failed", e)
+        } finally {
+            try {
+                output.pause()
+            } catch (_: Exception) {
+            }
+            warmupInProgress.set(false)
+        }
+
+        if (!warmupSucceeded) return
+
+        prefs.edit()
+            .putLong(KEY_AUDIO_WARMUP_LAST_VERSION_CODE, currentVersionCode)
+            .putLong(KEY_AUDIO_WARMUP_BASELINE_LATENCY_US, baselineLatencyUs)
+            .putString(KEY_AUDIO_WARMUP_BASELINE_FORMAT, selectedFormatText)
+            .putLong(KEY_AUDIO_WARMUP_BASELINE_TIMESTAMP_MS, System.currentTimeMillis())
+            .apply()
+
+        Log.i(
+            tag,
+            "Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}"
+        )
+    }
+
     private fun startPlayoutLoop() {
         playoutJob?.cancel()
         playoutJob = scope.launch {
-            val minBufferMs = 80L    // Increased from 60ms to provide more startup headroom and reduce late drops
+            val minBufferMs = -20L   // allow modestly late starts; catch-up logic will recover
             val maxStartAheadMs = 150L // Increased from 120ms to allow more buffer accumulation before starting
-            val resyncMinBufferMs = 20L
+            val resyncMinBufferMs = -10L
             val resyncMaxStartAheadMs = 90L
 
             // Normal "too-late" drop once we're running.
@@ -744,11 +855,12 @@ class SendspinPcmClient(
 
             // NEW: if output is stopped and the queue head is very late, we must drop until near-now,
             // otherwise bufferAheadMs stays negative and we never restart (queue grows forever).
-            val restartKeepWithinUs = 200_000L      // bring head within 200ms late
-            val restartMinAheadMs = 10L             // Increased from -50ms to prevent starting with negative buffer ahead
+            val restartKeepWithinUs = 20_000L       // bring head within ~20ms late before (re)start
+            val restartDropTriggerAheadMs = -60L    // pre-drop once head is meaningfully late
+            val restartMinAheadMs = -30L            // consider late-start recovery once head is below this
             val restartMinQueued =
-                6               // Increased from 4 to ~120ms at 48kHz stereo; ensures better startup stability
-            val forceStartAfterLoops = 100          // ~1s with 10ms retry delay
+                4               // allow recovery to begin sooner on constrained devices
+            val forceStartAfterLoops = 80           // ~0.8s with 10ms retry delay
 
             var lateRestartLoops = 0
             var restartBackoffMs = 200L
@@ -787,8 +899,11 @@ class SendspinPcmClient(
                         continue
                     }
 
+                    // One-time warmup baseline: run on first launch and after app updates.
+                    runAudioWarmupIfNeeded()
+
                     // NEW: prevent deadlock when head is late (negative ahead) by dropping late chunks now.
-                    if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartMinAheadMs) {
+                    if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartDropTriggerAheadMs) {
                         val dropped = jitter.dropWhileLate(nowUs(), restartKeepWithinUs)
                         if (dropped > 0) {
                             val nowMs = System.currentTimeMillis()
@@ -824,10 +939,10 @@ class SendspinPcmClient(
                     val startMinMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
                     val startMaxMs = if (forceResyncMode) resyncMaxStartAheadMs else maxStartAheadMs
 
-                    // Start only within a tight startup window so we don't launch 150-200ms late.
+                    // Start window is based on raw ahead; effective offset is handled in scheduling.
                     val canStartNormally =
                         snap2.queuedChunks >= restartMinQueued &&
-                                effectiveBufferAheadMs in startMinMs..startMaxMs
+                                snap2.bufferAheadMs in startMinMs..startMaxMs
 
                     // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
                     // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
@@ -837,11 +952,17 @@ class SendspinPcmClient(
                         lateRestartLoops = 0
                     }
 
-                    val forceLateStart = lateRestartLoops >= forceStartAfterLoops
-                    val canStart = canStartNormally || forceLateStart
+                    // If we remain late for a while, allow bounded late-start recovery instead of
+                    // endless prestart dropping (which can deadlock playback on constrained devices).
+                    val canStartLateRecovery =
+                        lateRestartLoops >= 20 && snap2.bufferAheadMs >= -50L
+
+                    val forceLateStart =
+                        lateRestartLoops >= forceStartAfterLoops && snap2.bufferAheadMs >= -40L
+                    val canStart = canStartNormally || canStartLateRecovery || forceLateStart
 
                     if (canStart) {
-                        if (forceLateStart && !canStartNormally) {
+                        if ((forceLateStart || canStartLateRecovery) && !canStartNormally) {
                             Log.w(
                                 tag,
                                 "forcing late-start recovery: ahead=${snap2.bufferAheadMs}ms effectiveAhead=${effectiveBufferAheadMs}ms queued=${snap2.queuedChunks}"
@@ -850,17 +971,21 @@ class SendspinPcmClient(
                             // instead of waiting for slow catch-up via playback speed adjustment
                             if (effectiveBufferAheadMs < -100) {
                                 triggerForceResync("late_start_too_far_behind")
+                                nextStartAttemptUs = nowUs() + 50_000L
+                                continue
                             }
                         }
                         output.start(sampleRate, channels, bitDepth)
                         if (!output.isStarted()) {
                             triggerForceResync("start_failed")
+                            outputStartedAtUs = 0L
                             val backoffNowUs = nowUs()
                             nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
                             Log.w(tag, "Audio output failed to start; backing off ${restartBackoffMs}ms")
                             restartBackoffMs = (restartBackoffMs * 2).coerceAtMost(3000L)
                             continue
                         }
+                        outputStartedAtUs = nowUs()
 
                         // Initialize Opus decoder if needed
                         if (codec == "opus") {
@@ -920,14 +1045,25 @@ class SendspinPcmClient(
                     )
                     else chunk.serverTimestampUs
 
+                val nowUsForSchedule = nowUs()
+                val sinceOutputStartUs =
+                    if (outputStartedAtUs > 0L) (nowUsForSchedule - outputStartedAtUs).coerceAtLeast(0L)
+                    else Long.MAX_VALUE
+
                 // Calculate effective playout offset: pipeline delay + measured codec decode latency + device adjustment
                 // Subtract staticDelayUs to schedule audio earlier, compensating for external device delay
-                val totalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
+                val startupRampFactor = when {
+                    sinceOutputStartUs == Long.MAX_VALUE -> 1.0
+                    sinceOutputStartUs >= startupPlayoutOffsetRampUs -> 1.0
+                    else -> sinceOutputStartUs.toDouble() / startupPlayoutOffsetRampUs.toDouble()
+                }
+                val rampedBasePlayoutOffsetUs = (playoutOffsetUs.toDouble() * startupRampFactor).toLong()
+                val totalPlayoutOffsetUs = rampedBasePlayoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
 
                 // Convert server timestamp to client time using Kalman filter offset
                 val localPlayUs =
                     clock.convertServerToClient(effectiveServerTsUs) + totalPlayoutOffsetUs
-                val now = nowUs()
+                val now = nowUsForSchedule
                 val earlyUs = localPlayUs - now
 
                 // Server-time lateness: how many ms the chunk is past its server timestamp.
@@ -976,8 +1112,11 @@ class SendspinPcmClient(
                 // false-positive cuts that produce the buffer-drain / drop cycle.
                 val nowMs = System.currentTimeMillis()
                 val timeSinceLastCutMs = nowMs - lastAudioCutMs
+                val startupCutGraceActive = sinceOutputStartUs < startupCutGraceUs
+                val effectiveOutOfSyncThresholdMs =
+                    if (startupCutGraceActive) (audioOutOfSyncThresholdMs + 120L) else audioOutOfSyncThresholdMs
 
-                if (!forceResyncMode && serverLatenessMs > audioOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
+                if (!forceResyncMode && serverLatenessMs > effectiveOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
                     val snapBeforeCut = jitter.snapshot()
                     val lateDropsCount = snapBeforeCut.lateDrops
                     Log.w(
@@ -985,6 +1124,7 @@ class SendspinPcmClient(
                         "audio-cut triggered: too far behind (serverLate=${serverLatenessMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing."
                     )
                     output.stop()
+                    outputStartedAtUs = 0L
                     triggerForceResync("audio_out_of_sync_late_drop")
                     lastAudioCutMs = nowMs
                     val backoffNowUs = nowUs()
@@ -1066,6 +1206,7 @@ class SendspinPcmClient(
                 if (!ok) {
                     Log.w(tag, "PCM write failed; restarting output")
                     output.stop()
+                    outputStartedAtUs = 0L
                     triggerForceResync("pcm_write_failed")
                     val backoffNowUs = nowUs()
                     nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
@@ -1147,6 +1288,7 @@ class SendspinPcmClient(
                     audioScheduleDebugCount = 0
                     playoutOffsetUs = -50_000L  // Reset to default on new stream
                     playoutOffsetAdjustmentUs = 0L  // Clear any accumulated adjustment too
+                    outputStartedAtUs = 0L
                     
                     val player = payload.optJSONObject("player")
                     if (player != null) {
@@ -1184,6 +1326,7 @@ class SendspinPcmClient(
                     streamEnded = true
                     // Pause instead of stop to allow reuse
                     output.pause()
+                    outputStartedAtUs = 0L
                     jitter.clear()
                     opusDecoder = null
                     playAtServerUs = Long.MIN_VALUE

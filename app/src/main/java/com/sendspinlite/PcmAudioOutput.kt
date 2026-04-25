@@ -3,6 +3,7 @@ package com.sendspinlite
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.*
+import android.os.SystemClock
 import android.util.Log
 import kotlin.math.max
 import java.util.concurrent.atomic.AtomicBoolean
@@ -12,9 +13,16 @@ import java.util.concurrent.atomic.AtomicLong
 class PcmAudioOutput {
     private val tag = "PcmAudioOutput"
 
+    data class PcmFormat(
+        val sampleRate: Int,
+        val channels: Int,
+        val bitDepth: Int
+    )
+
     companion object {
         /** Safety ceiling for pipeline latency estimation (2 seconds). */
         private const val MAX_PIPELINE_LATENCY_US = 2_000_000L
+        private const val SOFT_START_RAMP_MS = 35L
     }
 
     @Volatile
@@ -45,6 +53,12 @@ class PcmAudioOutput {
     @Volatile
     private var currentPlaybackSpeed: Float = 1.0f
 
+    @Volatile
+    private var softStartBeganAtMs: Long = 0L
+
+    @Volatile
+    private var lastAppliedTrackGain: Float = 1.0f
+
     fun isStarted(): Boolean = started.get()
 
     fun start(sampleRate: Int, channels: Int, bitDepth: Int) {
@@ -61,9 +75,12 @@ class PcmAudioOutput {
                 try {
                     // Always flush before restarting to clear old data
                     existingTrack.pause()
+                    applyTrackGainLocked(existingTrack, 0f)
                     existingTrack.flush()
-                    existingTrack.play()
+                    resetPlaybackSpeedLocked(existingTrack)
                     resetLatencyEstimatorLocked()
+                    existingTrack.play()
+                    beginSoftStartLocked(existingTrack)
                     started.set(true)
                     Log.i(tag, "AudioTrack reused and resumed for new stream")
                     return
@@ -78,18 +95,8 @@ class PcmAudioOutput {
 
             require(bitDepth in listOf(16, 24, 32)) { "Unsupported bit depth: $bitDepth. Must be 16, 24, or 32-bit PCM" }
 
-            val channelMask = when (channels) {
-                1 -> AudioFormat.CHANNEL_OUT_MONO
-                2 -> AudioFormat.CHANNEL_OUT_STEREO
-                else -> error("Unsupported channel count: $channels")
-            }
-
-            val encoding = when (bitDepth) {
-                16 -> AudioFormat.ENCODING_PCM_16BIT
-                24 -> AudioFormat.ENCODING_PCM_24BIT_PACKED
-                32 -> AudioFormat.ENCODING_PCM_32BIT
-                else -> error("Unsupported bit depth: $bitDepth")
-            }
+            val channelMask = channelMaskFor(channels)
+            val encoding = encodingFor(bitDepth)
 
             // Ensure valid sample rate
             val safeSampleRate = sampleRate.coerceAtLeast(4000)
@@ -131,9 +138,12 @@ class PcmAudioOutput {
                     return
                 }
 
-                audioTrack.play()
-                track = audioTrack
+                resetPlaybackSpeedLocked(audioTrack)
+                applyTrackGainLocked(audioTrack, 0f)
                 resetLatencyEstimatorLocked()
+                audioTrack.play()
+                beginSoftStartLocked(audioTrack)
+                track = audioTrack
                 started.set(true)
 
                 currentSampleRate = safeSampleRate
@@ -167,8 +177,11 @@ class PcmAudioOutput {
             val t = track
             if (t != null && t.state == AudioTrack.STATE_INITIALIZED) {
                 try {
+                    applyTrackGainLocked(t, 0f)
+                    resetPlaybackSpeedLocked(t)
                     t.pause()
                     t.flush()
+                    clearSoftStartLocked()
                     resetLatencyEstimatorLocked()
                     Log.i(tag, "AudioTrack paused and flushed")
                 } catch (e: Exception) {
@@ -193,16 +206,18 @@ class PcmAudioOutput {
             
             if (t.state == AudioTrack.STATE_UNINITIALIZED) return false
             if (t.playState != AudioTrack.PLAYSTATE_PLAYING) return false
+            updateSoftStartGain(t)
             
             var off = 0
             val bytesPerFrame = currentChannels * (currentBitDepth / 8)
             var zeroWriteCount = 0
-            val maxZeroWrites = 50  // ~100ms of zero writes before giving up
+            val maxZeroWrites = 50  // ~100ms of zero writes before fallback strategy
             val writeStartTime = System.currentTimeMillis()
             val maxWriteTime = 500L  // 500ms timeout to prevent blocking audio thread
             
             while (off < pcm.size && System.currentTimeMillis() - writeStartTime < maxWriteTime) {
                 if (!started.get()) break
+                updateSoftStartGain(t)
                 
                 try {
                     val n = t.write(pcm, off, pcm.size - off, AudioTrack.WRITE_NON_BLOCKING)
@@ -215,8 +230,26 @@ class PcmAudioOutput {
                         // Buffer full - yield and retry a few times then give up
                         zeroWriteCount++
                         if (zeroWriteCount > maxZeroWrites) {
-                            Log.w(tag, "AudioTrack buffer persistently full after $zeroWriteCount attempts, skipping rest of chunk")
-                            return false
+                            // Fallback: try one blocking write to drain the remaining bytes.
+                            // If even that fails, treat partial write as non-fatal to avoid
+                            // restart thrash loops at stream start.
+                            val remaining = pcm.size - off
+                            val blockingN = t.write(pcm, off, remaining, AudioTrack.WRITE_BLOCKING)
+                            if (blockingN < 0) {
+                                Log.w(tag, "AudioTrack blocking write returned error: $blockingN")
+                                markTrackDeadAndRelease(t, "blocking_write_error_$blockingN")
+                                return false
+                            }
+                            if (blockingN == 0) {
+                                Log.w(
+                                    tag,
+                                    "AudioTrack buffer remained full after retries; dropping tail (${pcm.size - off} bytes)"
+                                )
+                                return off > 0
+                            }
+                            off += blockingN
+                            zeroWriteCount = 0
+                            continue
                         }
                         // Yield to other threads briefly
                         Thread.yield()
@@ -239,7 +272,7 @@ class PcmAudioOutput {
             // Log if we timed out
             if (off < pcm.size) {
                 Log.w(tag, "writePcm timeout/incomplete: wrote ${off} of ${pcm.size} bytes")
-                return false
+                return off > 0
             }
             return true
         } catch (e: Exception) {
@@ -261,6 +294,7 @@ class PcmAudioOutput {
             }
         }
 
+        try { applyTrackGainLocked(t, 0f) } catch (_: Exception) {}
         try { t.pause() } catch (_: Exception) {}
         try { t.flush() } catch (_: Exception) {}
         try { t.stop() } catch (_: Exception) {}
@@ -306,6 +340,58 @@ class PcmAudioOutput {
             } catch (e: Exception) {
                 Log.w(tag, "Failed to set playback speed to $clampedSpeed: ${e.message}")
             }
+        }
+    }
+
+    private fun resetPlaybackSpeedLocked(track: AudioTrack) {
+        try {
+            track.playbackParams = PlaybackParams().setSpeed(1.0f)
+        } catch (_: Exception) {
+        }
+        currentPlaybackSpeed = 1.0f
+    }
+
+    private fun beginSoftStartLocked(track: AudioTrack) {
+        applyTrackGainLocked(track, 0f)
+        softStartBeganAtMs = SystemClock.elapsedRealtime()
+    }
+
+    private fun clearSoftStartLocked() {
+        softStartBeganAtMs = 0L
+        lastAppliedTrackGain = 0f
+    }
+
+    private fun updateSoftStartGain(track: AudioTrack) {
+        val beganAtMs = softStartBeganAtMs
+        if (beganAtMs == 0L) return
+
+        val elapsedMs = (SystemClock.elapsedRealtime() - beganAtMs).coerceAtLeast(0L)
+        val gain = if (elapsedMs >= SOFT_START_RAMP_MS) {
+            1.0f
+        } else {
+            (elapsedMs.toFloat() / SOFT_START_RAMP_MS.toFloat()).coerceIn(0f, 1.0f)
+        }
+
+        synchronized(lock) {
+            if (this.track !== track || track.state != AudioTrack.STATE_INITIALIZED) return
+            val shouldApply =
+                kotlin.math.abs(gain - lastAppliedTrackGain) >= 0.05f || gain >= 0.999f || lastAppliedTrackGain == 0f
+            if (shouldApply) {
+                applyTrackGainLocked(track, gain)
+            }
+            if (gain >= 0.999f) {
+                softStartBeganAtMs = 0L
+            }
+        }
+    }
+
+    private fun applyTrackGainLocked(track: AudioTrack, gain: Float) {
+        val clampedGain = gain.coerceIn(0f, 1.0f)
+        try {
+            track.setVolume(clampedGain)
+            lastAppliedTrackGain = clampedGain
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to set AudioTrack gain=$clampedGain", e)
         }
     }
 
@@ -424,6 +510,7 @@ class PcmAudioOutput {
             try {
                 if (t.state == AudioTrack.STATE_INITIALIZED) {
                     // Pause first to unblock any writers blocked in native write()
+                    try { applyTrackGainLocked(t, 0f) } catch (_: Exception) {}
                     try { t.pause() } catch (_: Exception) {}
                     try { t.flush() } catch (_: Exception) {}
                 }
@@ -461,6 +548,8 @@ class PcmAudioOutput {
         playbackHeadWraps = 0L
         smoothedLatencyUs = 0L
         currentPlaybackSpeed = 1.0f
+        softStartBeganAtMs = 0L
+        lastAppliedTrackGain = 1.0f
     }
 
     fun checkAudioCapabilities(context: Context) {
@@ -480,5 +569,109 @@ class PcmAudioOutput {
         // Will put us more at risk of underruns, chunk drops and recovery events via audibleSyncs
         // The app will also be more sensitive to jitter, which can happen at anypoint on the audio pipeline
         // Benefits to this would be a lower base output latency which will be good for responsiveness
+    }
+
+    fun getDevicePreferredSampleRate(context: Context): Int {
+        return try {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull() ?: 48000
+        } catch (_: Exception) {
+            48000
+        }
+    }
+
+    /**
+     * Select the highest native PCM format by probing AudioTrack initialization.
+     * Preference order:
+     *  1) preferred sample rate first (when present in candidates)
+     *  2) higher sample rates
+     *  3) more channels
+     *  4) higher bit depth (32 -> 24 -> 16)
+     */
+    fun selectHighestNativePcmFormat(
+        context: Context,
+        sampleRateCandidates: List<Int>,
+        channelCandidates: List<Int>,
+        bitDepthCandidates: List<Int>
+    ): PcmFormat? {
+        val preferredSampleRate = getDevicePreferredSampleRate(context)
+        val orderedSampleRates = sampleRateCandidates
+            .distinct()
+            .sortedWith(
+                compareByDescending<Int> { it == preferredSampleRate }
+                    .thenByDescending { it }
+            )
+        val orderedChannels = channelCandidates.distinct().sortedDescending()
+        val orderedBitDepths = bitDepthCandidates.distinct().sortedDescending()
+
+        for (sampleRate in orderedSampleRates) {
+            for (channels in orderedChannels) {
+                for (bitDepth in orderedBitDepths) {
+                    val format = PcmFormat(sampleRate, channels, bitDepth)
+                    if (isNativePcmFormatSupported(format)) {
+                        Log.i(
+                            tag,
+                            "Selected native warmup format sr=${format.sampleRate} ch=${format.channels} bd=${format.bitDepth}"
+                        )
+                        return format
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun isNativePcmFormatSupported(format: PcmFormat): Boolean {
+        return try {
+            val safeRate = format.sampleRate.coerceAtLeast(4000)
+            val channelMask = channelMaskFor(format.channels)
+            val encoding = encodingFor(format.bitDepth)
+            val minBuf = AudioTrack.getMinBufferSize(safeRate, channelMask, encoding)
+            if (minBuf <= 0) return false
+
+            val bytesPerFrame = format.channels * (format.bitDepth / 8)
+            if (bytesPerFrame <= 0) return false
+
+            val formatObj = AudioFormat.Builder()
+                .setEncoding(encoding)
+                .setSampleRate(safeRate)
+                .setChannelMask(channelMask)
+                .build()
+
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+
+            val probeTrack = AudioTrack(
+                attrs,
+                formatObj,
+                max(minBuf * 2, bytesPerFrame * 512),
+                AudioTrack.MODE_STREAM,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            )
+
+            val ok = probeTrack.state == AudioTrack.STATE_INITIALIZED
+            try {
+                probeTrack.release()
+            } catch (_: Exception) {
+            }
+            ok
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun channelMaskFor(channels: Int): Int = when (channels) {
+        1 -> AudioFormat.CHANNEL_OUT_MONO
+        2 -> AudioFormat.CHANNEL_OUT_STEREO
+        else -> error("Unsupported channel count: $channels")
+    }
+
+    private fun encodingFor(bitDepth: Int): Int = when (bitDepth) {
+        16 -> AudioFormat.ENCODING_PCM_16BIT
+        24 -> AudioFormat.ENCODING_PCM_24BIT_PACKED
+        32 -> AudioFormat.ENCODING_PCM_32BIT
+        else -> error("Unsupported bit depth: $bitDepth")
     }
 }

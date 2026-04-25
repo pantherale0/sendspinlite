@@ -96,7 +96,12 @@ class ClockSync(
     private val networkMetricsLock = Any()
     private val rttHistory = ArrayDeque<Long>(20)
     private val maxErrorHistory = ArrayDeque<Long>(20)
+    @Volatile
     private var estimatedNetworkJitterUs: Long = 0
+    @Volatile
+    private var averageRttUs: Long = 0
+    @Volatile
+    private var cachedNetworkQuality: NetworkQuality = NetworkQuality.FAIR
 
     // Frequency recommendation with hysteresis
     private var lastRecommendedFrequencyMs: Long = 0
@@ -153,36 +158,54 @@ class ClockSync(
     private fun update(measurement: Long, maxError: Long, timeAddedUs: Long) {
         if (timeAddedUs == lastUpdateUs) return   // skip duplicate timestamps
 
-        // Reject extreme outliers: if maxError (half-RTT) is much larger than recent RTT history
-        // Only apply after filter has converged to avoid rejecting valid startup measurements
-        synchronized(networkMetricsLock) {
-            val rtt = 2 * maxError
-            
-            // Only apply outlier rejection after convergence with enough samples
-            if (hasConverged() && rttHistory.size >= 10) {
-                val sorted = rttHistory.sorted()
-                val medianRtt = if (sorted.size % 2 == 0) {
+        // Reject extreme outliers: if maxError (half-RTT) is much larger than recent RTT history.
+        // Keep lock hold short by taking a snapshot and doing expensive work outside the lock.
+        val rtt = 2 * maxError
+        var medianRtt: Long? = null
+        if (hasConverged()) {
+            val rttSnapshot = synchronized(networkMetricsLock) {
+                if (rttHistory.size >= 10) rttHistory.toList() else emptyList()
+            }
+            if (rttSnapshot.isNotEmpty()) {
+                val sorted = rttSnapshot.sorted()
+                medianRtt = if (sorted.size % 2 == 0) {
                     (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
                 } else {
                     sorted[sorted.size / 2]
                 }
-                
-                // Reject measurements where RTT > 4.0x the median (conservative outlier threshold)
-                // This allows natural network jitter while rejecting GC/UI jank spikes
-                if (rtt > 4.0 * medianRtt) {
+                if (medianRtt > 0L && rtt > 4.0 * medianRtt) {
                     Log.w(tag, "Extreme outlier rejected: rtt=${rtt}us vs median=${medianRtt}us (factor=${rtt.toDouble() / medianRtt})")
                     return
                 }
             }
-            
+        }
+
+        synchronized(networkMetricsLock) {
             rttHistory.addLast(rtt)
             if (rttHistory.size > 20) rttHistory.removeFirst()
             maxErrorHistory.addLast(maxError)
             if (maxErrorHistory.size > 20) maxErrorHistory.removeFirst()
+
+            averageRttUs = if (rttHistory.isEmpty()) 0L else rttHistory.average().toLong()
+
             if (rttHistory.size >= 5) {
                 val mean = rttHistory.average()
                 val variance = rttHistory.map { (it - mean) * (it - mean) }.average()
                 estimatedNetworkJitterUs = sqrt(variance).toLong()
+            }
+
+            cachedNetworkQuality = if (maxErrorHistory.isEmpty()) {
+                NetworkQuality.FAIR
+            } else {
+                val avgMaxError = maxErrorHistory.average().toLong()
+                val maxJitter = if (rttHistory.size >= 2) {
+                    (rttHistory.maxOrNull() ?: 0L) - (rttHistory.minOrNull() ?: 0L)
+                } else 0L
+                when {
+                    avgMaxError < 20_000 && maxJitter < 20_000 -> NetworkQuality.GOOD
+                    avgMaxError > 100_000 || maxJitter > 50_000 -> NetworkQuality.POOR
+                    else -> NetworkQuality.FAIR
+                }
             }
         }
 
@@ -282,9 +305,15 @@ class ClockSync(
         val residual: Double = normalizedMeasurement.toDouble() - predictedOffset
         lastResidualUs = residual
 
-        // Track Kalman anomalies: large residuals indicate filter is struggling
-        // (residual should be small if filter is well-calibrated and network is stable)
-        if (abs(residual) > 50_000.0) {  // > 50ms residual is anomalous
+        // Track Kalman anomalies only after startup and only on usable network samples.
+        // This avoids counting false positives during initial convergence / GC spikes.
+        val dynamicResidualThresholdUs = maxOf(50_000.0, maxError.toDouble() * 3.0)
+        if (
+            updateCount >= 30 &&
+            hasConverged() &&
+            maxError <= 120_000L &&
+            abs(residual) > dynamicResidualThresholdUs
+        ) {
             kalmanErrorCount++
         }
 
@@ -384,18 +413,7 @@ class ClockSync(
     }
 
     fun getNetworkConditionQuality(): NetworkQuality {
-        synchronized(networkMetricsLock) {
-            if (maxErrorHistory.isEmpty()) return NetworkQuality.FAIR
-            val avgMaxError = maxErrorHistory.average().toLong()
-            val maxJitter = if (rttHistory.size >= 2) {
-                (rttHistory.maxOrNull() ?: 0L) - (rttHistory.minOrNull() ?: 0L)
-            } else 0L
-            return when {
-                avgMaxError < 20_000 && maxJitter < 20_000 -> NetworkQuality.GOOD
-                avgMaxError > 100_000 || maxJitter > 50_000 -> NetworkQuality.POOR
-                else -> NetworkQuality.FAIR
-            }
-        }
+        return cachedNetworkQuality
     }
 
     fun getClockStability(): ClockStability {
@@ -453,9 +471,7 @@ class ClockSync(
 
     /** Get the average RTT from recent measurements. Returns 0 if no data. */
     fun getAverageRttUs(): Long {
-        synchronized(networkMetricsLock) {
-            return if (rttHistory.isEmpty()) 0L else rttHistory.average().toLong()
-        }
+        return averageRttUs
     }
 
     fun reset() {
@@ -478,6 +494,8 @@ class ClockSync(
             maxErrorHistory.clear()
         }
         estimatedNetworkJitterUs = 0
+        averageRttUs = 0
+        cachedNetworkQuality = NetworkQuality.FAIR
         lastRecommendedFrequencyMs = 0
         lastFrequencyChangeTimeMs = 0
         convergedAtTimeMs = 0

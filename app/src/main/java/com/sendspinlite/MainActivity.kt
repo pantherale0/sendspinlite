@@ -917,8 +917,8 @@ private fun PlayerScreen(
                     
                     // Display smoothed latency
                     val latencyColor = when {
-                        ui.smoothedLatencyMs < 50.0 -> Color.Green
-                        ui.smoothedLatencyMs < 100.0 -> Color(0xFFFFA500)  // Orange
+                        ui.smoothedLatencyMs < 300.0 -> Color.Green
+                        ui.smoothedLatencyMs < 500.0 -> Color(0xFFFFA500)  // Orange
                         else -> MaterialTheme.colors.error
                     }
                     SyncInfoRow("Audio Latency", "${"%.1f".format(ui.smoothedLatencyMs)}ms", latencyColor)
