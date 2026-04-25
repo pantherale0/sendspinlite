@@ -322,7 +322,8 @@ class PcmAudioOutput {
     /**
      * Estimated pipeline latency from AudioTrack write to speaker output (microseconds).
      * Prefers AudioTimestamp (which captures DSP and hardware-buffer latency that
-     * playbackHeadPosition misses on devices such as Amazon Echo Show 8 / Fire OS),
+     * playbackHeadPosition misses on devices such as Amazon Echo Show 8 running LineageOS
+     * (android_device_amazon_crown)),
      * falling back to playbackHeadPosition when a timestamp is unavailable.
      * No fixed 250 ms upper cap: high-latency devices are reported accurately.
      */
@@ -355,7 +356,8 @@ class PcmAudioOutput {
             val writtenFrames = totalFramesWritten.get()
 
             // Prefer AudioTimestamp: it captures DSP / HAL / hardware-buffer latency that
-            // playbackHeadPosition misses on devices like Amazon Echo Show 8 (Fire OS).
+            // playbackHeadPosition misses on devices like Amazon Echo Show 8 running LineageOS
+            // (android_device_amazon_crown).
             val audioTimestamp = AudioTimestamp()
             val dynamicUs: Long = if (trackRef.getTimestamp(audioTimestamp) &&
                 audioTimestamp.nanoTime != 0L
@@ -384,7 +386,7 @@ class PcmAudioOutput {
             }
 
             // No fixed 250 ms upper cap: allow accurate reporting for high-latency devices
-            // (e.g. Amazon Echo Show 8 with Fire OS, which can have 700 ms+ pipeline latency).
+            // (e.g. Amazon Echo Show 8 running LineageOS, which can have 700 ms+ pipeline latency).
             // MAX_PIPELINE_LATENCY_US guards against completely unrealistic values.
             return smoothedLatencyUs.coerceIn(20_000L, MAX_PIPELINE_LATENCY_US)
         }
