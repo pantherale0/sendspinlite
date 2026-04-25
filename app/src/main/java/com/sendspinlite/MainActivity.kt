@@ -240,6 +240,24 @@ private fun PlayerScreen(
         }
     }
 
+    /** Collect an audio report on IO, save it to filesDir, then open the file picker. */
+    fun onSaveAudioReport() {
+        isCollectingAudioReport = true
+        scope.launch(Dispatchers.IO) {
+            val report = AudioIssueReporter.buildReport(ui)
+            val fileUri = AudioIssueReporter.saveReportToFile(context, report)
+            withContext(Dispatchers.Main) {
+                isCollectingAudioReport = false
+                if (fileUri != null) {
+                    val timestamp = SimpleDateFormat(
+                        "yyyy-MM-dd_HH-mm-ss", Locale.getDefault()
+                    ).format(Date())
+                    audioReportSaveLauncher.launch("sendspin_audio_report_$timestamp.txt")
+                }
+            }
+        }
+    }
+
     // Sync with system volume when UI is shown
     LaunchedEffect(Unit) {
         vm.updateAndroidVolumeState()
@@ -569,20 +587,7 @@ private fun PlayerScreen(
                         Button(
                             onClick = {
                                 showAudioIssueDialog = false
-                                isCollectingAudioReport = true
-                                scope.launch(Dispatchers.IO) {
-                                    val report = AudioIssueReporter.buildReport(ui)
-                                    AudioIssueReporter.saveReportToFile(context, report)
-                                    withContext(Dispatchers.Main) {
-                                        isCollectingAudioReport = false
-                                        val timestamp = SimpleDateFormat(
-                                            "yyyy-MM-dd_HH-mm-ss", Locale.getDefault()
-                                        ).format(Date())
-                                        audioReportSaveLauncher.launch(
-                                            "sendspin_audio_report_$timestamp.txt"
-                                        )
-                                    }
-                                }
+                                onSaveAudioReport()
                             }
                         ) {
                             Text("Save to File")
@@ -594,20 +599,7 @@ private fun PlayerScreen(
                         TextButton(
                             onClick = {
                                 showAudioIssueDialog = false
-                                isCollectingAudioReport = true
-                                scope.launch(Dispatchers.IO) {
-                                    val report = AudioIssueReporter.buildReport(ui)
-                                    AudioIssueReporter.saveReportToFile(context, report)
-                                    withContext(Dispatchers.Main) {
-                                        isCollectingAudioReport = false
-                                        val timestamp = SimpleDateFormat(
-                                            "yyyy-MM-dd_HH-mm-ss", Locale.getDefault()
-                                        ).format(Date())
-                                        audioReportSaveLauncher.launch(
-                                            "sendspin_audio_report_$timestamp.txt"
-                                        )
-                                    }
-                                }
+                                onSaveAudioReport()
                             }
                         ) {
                             Text("Save to File")
@@ -656,6 +648,18 @@ private fun PlayerScreen(
                 confirmButton = {
                     Button(onClick = { showAudioIssueResultDialog = false }) {
                         Text("OK")
+                    }
+                },
+                dismissButton = {
+                    if (audioIssueSentryEventId == null) {
+                        TextButton(
+                            onClick = {
+                                showAudioIssueResultDialog = false
+                                onSaveAudioReport()
+                            }
+                        ) {
+                            Text("Save to File")
+                        }
                     }
                 }
             )

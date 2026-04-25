@@ -147,7 +147,7 @@ object AudioIssueReporter {
     }
 
     /**
-     * Write [report] to a private cache file and return a shareable content [Uri]
+     * Write [report] to a private storage file and return a shareable content [Uri]
      * (via [FileProvider]), or `null` on failure.
      */
     fun saveReportToFile(context: Context, report: String): Uri? {
