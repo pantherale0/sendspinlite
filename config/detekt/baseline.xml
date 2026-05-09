@@ -6,15 +6,15 @@
     <ID>ComplexCondition:PcmAudioOutput.kt$PcmAudioOutput$existingTrack != null &amp;&amp; currentSampleRate == sampleRate &amp;&amp; currentChannels == channels &amp;&amp; currentBitDepth == bitDepth &amp;&amp; existingTrack.state == AudioTrack.STATE_INITIALIZED</ID>
     <ID>ComplexCondition:SendspinService.kt$SendspinService$client != null &amp;&amp; _uiState.value.wsUrl == wsUrl &amp;&amp; _uiState.value.clientId == clientId &amp;&amp; (_uiState.value.connected || _uiState.value.status.startsWith("connecting"))</ID>
     <ID>ComplexCondition:SendspinService.kt$SendspinService.&lt;no name provided&gt;$(currentState.status.startsWith("failure:") || !currentState.connected) &amp;&amp; !currentState.wsUrl.isBlank() &amp;&amp; !currentState.clientId.isBlank() &amp;&amp; !currentState.clientName.isBlank()</ID>
-    <ID>CyclomaticComplexMethod:ClockSync.kt$ClockSync$private fun update(measurement: Long, maxError: Long, timeAddedUs: Long)</ID>
-    <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {} )</ID>
+    <ID>CyclomaticComplexMethod:ClockSync.kt$ClockSync$private fun update( measurement: Long, maxError: Long, timeAddedUs: Long, )</ID>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {}, )</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>CyclomaticComplexMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun handleText(text: String)</ID>
     <ID>CyclomaticComplexMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun startPlayoutLoop()</ID>
-    <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$fun connect(wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false)</ID>
+    <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
-    <ID>FunctionNaming:MainActivity.kt$@Composable fun SyncInfoRow( label: String, value: String, color: androidx.compose.ui.graphics.Color = MaterialTheme.colors.onSurface )</ID>
-    <ID>FunctionNaming:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {} )</ID>
+    <ID>FunctionNaming:MainActivity.kt$@Composable fun SyncInfoRow( label: String, value: String, color: androidx.compose.ui.graphics.Color = MaterialTheme.colors.onSurface, )</ID>
+    <ID>FunctionNaming:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {}, )</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.1f", uiState.smoothedLatencyMs)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.2f", uiState.driftSnr)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.2f", uiState.rttUs / 1000.0)</ID>
@@ -30,14 +30,16 @@
     <ID>ImplicitDefaultLocale:SendspinPcmClient.kt$SendspinPcmClient$String.format("%.3f", driftUncertaintyPpm)</ID>
     <ID>LargeClass:SendspinPcmClient.kt$SendspinPcmClient</ID>
     <ID>LongMethod:AudioIssueReporter.kt$AudioIssueReporter$fun buildReport(uiState: PlayerViewModel.UiState): String</ID>
-    <ID>LongMethod:ClockSync.kt$ClockSync$private fun update(measurement: Long, maxError: Long, timeAddedUs: Long)</ID>
-    <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {} )</ID>
-    <ID>LongMethod:MainActivity.kt$private fun exportAndShareLogs(context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -&gt; Unit)</ID>
-    <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start(sampleRate: Int, channels: Int, bitDepth: Int)</ID>
+    <ID>LongMethod:ClockSync.kt$ClockSync$private fun update( measurement: Long, maxError: Long, timeAddedUs: Long, )</ID>
+    <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {}, )</ID>
+    <ID>LongMethod:MainActivity.kt$private fun exportAndShareLogs( context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -&gt; Unit, )</ID>
+    <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun handleText(text: String)</ID>
     <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun startPlayoutLoop()</ID>
     <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$private suspend fun runAudioWarmupIfNeeded()</ID>
+    <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$suspend fun connect()</ID>
+    <ID>LongMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
     <ID>LoopWithTooManyJumpStatements:AudioJitterBuffer.kt$AudioJitterBuffer$while</ID>
     <ID>LoopWithTooManyJumpStatements:PcmAudioOutput.kt$PcmAudioOutput$while</ID>
@@ -211,30 +213,33 @@
     <ID>MagicNumber:SendspinService.kt$SendspinService$60000L</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService.&lt;no name provided&gt;$100</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService.&lt;no name provided&gt;$1000</ID>
+    <ID>MaxLineLength:AutoUpdateManager.kt$AutoUpdateManager$private fun prefs(context: Context): SharedPreferences</ID>
     <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.d(tag, "convertServerToClient: server=$serverTimeUs baseline=$baseline offset=${te.offset.toLong()}us -&gt; client=$result")</ID>
     <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.i(tag, "Init [1/8]: offset=${normalizedMeasurement}us (raw=${measurement}us, baseline=${baselineOffsetUs}us)")</ID>
     <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.i(tag, "Initialization complete: offset=${offset.toLong()}us, starting Kalman filter for continuous drift tracking")</ID>
     <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.w(tag, "Extreme outlier rejected: rtt=${rtt}us vs median=${medianRtt}us (factor=${rtt.toDouble() / medianRtt})")</ID>
+    <ID>MaxLineLength:CrashReportingManager.kt$CrashReportingManager$private fun prefs(context: Context): SharedPreferences</ID>
     <ID>MaxLineLength:MainActivity.kt$"Sendspin Lite crashed during the last session. The crash was automatically reported to help improve the app."</ID>
     <ID>MaxLineLength:MainActivity.kt$"Sendspin Lite crashed during the last session. Would you like to send an anonymous crash report to help improve the app?"</ID>
     <ID>MaxLineLength:MainActivity.kt$"The upload failed. Please save the report to a file and attach it to your GitHub issue instead."</ID>
     <ID>MaxLineLength:MainActivity.kt$MainActivity$showBatteryWarning = !shownBatteryWarning &amp;&amp; Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.LOLLIPOP</ID>
-    <ID>MaxLineLength:MainActivity.kt$private</ID>
     <ID>MaxLineLength:MainActivity.kt$stringBuilder.append("Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}\n")</ID>
     <ID>MaxLineLength:MainActivity.kt$ui.playbackSpeedMultiplier &gt;= 0.995f &amp;&amp; ui.playbackSpeedMultiplier &lt;= 1.005f -&gt; Color(0xFFFFA500)</ID>
+    <ID>MaxLineLength:MainActivity.kt$ui.playbackSpeedMultiplier &gt;= 0.999f &amp;&amp; ui.playbackSpeedMultiplier &lt;= 1.001f -&gt; Color.Green</ID>
+    <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBuffer=$deviceOptimalBuffer"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"AudioTrack buffer remained full after retries; dropping tail (${pcm.size - off} bytes)"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"Selected native warmup format sr=${format.sampleRate} ch=${format.channels} bd=${format.bitDepth}"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$// For now we won't do anything with this, but we can explore adjusting the 250ms HAL buffer based on the deviceOptimalBuffer</ID>
-    <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$Log.i(tag, "Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBuffer=$deviceOptimalBuffer")</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$Log.i(tag, "AudioTrack started sr=$safeSampleRate ch=$channels bd=$bitDepth minBuf=$minBuf bufferBytes=$bufferBytes")</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$require(bitDepth in listOf(16, 24, 32)) { "Unsupported bit depth: $bitDepth. Must be 16, 24, or 32-bit PCM" }</ID>
+    <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$SendspinService.startService(getApplication(), wsUrl, deviceId, "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$deviceId = Settings.Secure.getString(getApplication&lt;Application&gt;().contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"</ID>
-    <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$private val _ui = MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$val activityManager = getApplication&lt;Application&gt;().getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"Audio output started sr=$sampleRate ch=$channels bd=$bitDepth codec=$codec (buffered=${snap2.bufferAheadMs}ms)"</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}"</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"CRITICAL memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 150 for LAN stability)"</ID>
+    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"LOW memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 200 for stable playback)"</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"Stream discontinuity detected: jump=${timestampJumpUs / 1000}ms, clearing buffer and entering discontinuity recovery mode"</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"audio-cut triggered: too far behind (serverLate=${serverLatenessMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing."</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"catch-up: dropped=$dropped (${(nowUs() - catchupStart) / 1000}ms) playoutOffset=${playoutOffsetUs / 1000}ms adjustment=${playoutOffsetAdjustmentUs / 1000}ms (audibleSyncCount=$audibleSyncCount)"</ID>
@@ -243,7 +248,8 @@
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"offset=${clock.estimatedOffsetUs() / 1000L}ms drift=${String.format("%.3f", clock.estimatedDriftPpm())}ppm"</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"restart-catchup: dropped=$dropped head was late (ahead~${snapshot.bufferAheadMs}ms)"</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$// Calculate effective playout offset: pipeline delay + measured codec decode latency + device adjustment</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs/1000}ms serverLate=${serverLatenessMs}ms playout=${totalPlayoutOffsetUs/1000}ms")</ID>
+    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs / 1000}ms serverLate=${serverLatenessMs}ms playout=${totalPlayoutOffsetUs / 1000}ms")</ID>
+    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$Log.i(tag, "force-resync complete: serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$Log.w(tag, "force-resync runtime: dropped=$dropped serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$if</ID>
     <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs</ID>
@@ -252,20 +258,15 @@
     <ID>MaxLineLength:SendspinService.kt$SendspinService$startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService.&lt;no name provided&gt;$connect(currentState.wsUrl, currentState.clientId, currentState.clientName, fromBoot = false)</ID>
     <ID>MaxLineLength:ServiceDiscovery.kt$ServiceDiscovery.&lt;no name provided&gt;$Log.i(tag, "Added server: ${discoveredServer.name} at $url. Total servers: ${_discoveredServers.value.size}")</ID>
-    <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun selectHighestNativePcmFormat( context: Context, sampleRateCandidates: List&lt;Int&gt;, channelCandidates: List&lt;Int&gt;, bitDepthCandidates: List&lt;Int&gt; ): PcmFormat?</ID>
+    <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun selectHighestNativePcmFormat( context: Context, sampleRateCandidates: List&lt;Int&gt;, channelCandidates: List&lt;Int&gt;, bitDepthCandidates: List&lt;Int&gt;, ): PcmFormat?</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$private fun stopInternal(t: AudioTrack?)</ID>
     <ID>NestedBlockDepth:SendspinPcmClient.kt$SendspinPcmClient$private fun getConnectionType(): String</ID>
     <ID>NestedBlockDepth:SendspinPcmClient.kt$SendspinPcmClient$private fun handleText(text: String)</ID>
-    <ID>NewLineAtEndOfFile:MainActivity.kt$com.sendspinlite.MainActivity.kt</ID>
-    <ID>NewLineAtEndOfFile:OpusDecoder.kt$com.sendspinlite.OpusDecoder.kt</ID>
-    <ID>NewLineAtEndOfFile:PlayerViewModel.kt$com.sendspinlite.PlayerViewModel.kt</ID>
-    <ID>NewLineAtEndOfFile:SendspinPcmClient.kt$com.sendspinlite.SendspinPcmClient.kt</ID>
-    <ID>NewLineAtEndOfFile:SendspinService.kt$com.sendspinlite.SendspinService.kt</ID>
-    <ID>ReturnCount:AutoUpdateManager.kt$AutoUpdateManager$fun installDownloadedApk(context: Context, downloadId: Long)</ID>
-    <ID>ReturnCount:AutoUpdateManager.kt$AutoUpdateManager$internal fun isNewerVersion(remote: String, current: String): Boolean</ID>
-    <ID>ReturnCount:ClockSync.kt$ClockSync$private fun update(measurement: Long, maxError: Long, timeAddedUs: Long)</ID>
-    <ID>ReturnCount:DownloadCompleteReceiver.kt$DownloadCompleteReceiver$override fun onReceive(context: Context, intent: Intent)</ID>
+    <ID>ReturnCount:AutoUpdateManager.kt$AutoUpdateManager$fun installDownloadedApk( context: Context, downloadId: Long, )</ID>
+    <ID>ReturnCount:AutoUpdateManager.kt$AutoUpdateManager$internal fun isNewerVersion( remote: String, current: String, ): Boolean</ID>
+    <ID>ReturnCount:ClockSync.kt$ClockSync$private fun update( measurement: Long, maxError: Long, timeAddedUs: Long, )</ID>
+    <ID>ReturnCount:DownloadCompleteReceiver.kt$DownloadCompleteReceiver$override fun onReceive( context: Context, intent: Intent, )</ID>
     <ID>ReturnCount:OpusDecoder.kt$OpusDecoder$fun decode(opusData: ByteArray): ByteArray</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun getEstimatedPipelineLatencyUs(): Long</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun setPlaybackSpeed(speed: Float)</ID>
