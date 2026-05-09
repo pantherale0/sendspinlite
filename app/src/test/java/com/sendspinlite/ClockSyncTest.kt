@@ -7,7 +7,7 @@ class ClockSyncTest {
 
     @Test
     fun hasConverged_becomesTrueAfterSufficientUpdates() {
-        val clockSync = ClockSync()
+        val clockSync = ClockSync.referenceFilter()
 
         repeat(20) { i ->
             val clientTx = 1_000_000L + (i * 100_000L)
@@ -28,7 +28,7 @@ class ClockSyncTest {
 
     @Test
     fun reset_returnsClockSyncToInitialState() {
-        val clockSync = ClockSync()
+        val clockSync = ClockSync.referenceFilter()
 
         repeat(5) { i ->
             val clientTx = 2_000_000L + (i * 100_000L)

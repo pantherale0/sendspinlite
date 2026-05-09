@@ -10,7 +10,7 @@ class AudioJitterBufferTest {
 
     @Before
     fun setUp() {
-        buffer = AudioJitterBuffer(ClockSync())
+        buffer = AudioJitterBuffer(ClockSync.referenceFilter())
     }
 
     @Test

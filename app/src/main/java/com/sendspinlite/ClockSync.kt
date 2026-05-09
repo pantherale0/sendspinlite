@@ -372,11 +372,18 @@ class ClockSync(
     /**
      * Convert a server timestamp to the equivalent client timestamp.
      * client_time = server_time + baseline + offset
+     *
+     * Drift extrapolation uses `clientNowMonotonicUs - lastUpdate`; both must use the same client
+     * monotonic microsecond clock as [onServerTime] (this app: `System.nanoTime() / 1000`).
+     * Pass the same "now" used for surrounding scheduling math (see [convertClientToServer]).
      */
-    fun convertServerToClient(serverTimeUs: Long): Long {
+    fun convertServerToClient(
+        serverTimeUs: Long,
+        clientNowMonotonicUs: Long = System.nanoTime() / 1000L
+    ): Long {
         val te = currentTimeElement
         val baseline = baselineOffsetUs ?: 0L
-        val dt = (System.nanoTime() / 1000L - te.lastUpdate).toDouble()
+        val dt = (clientNowMonotonicUs - te.lastUpdate).toDouble()
         val fullOffset = baseline + (te.offset + te.drift * dt).toLong()
         val result = serverTimeUs + fullOffset
         
@@ -504,5 +511,21 @@ class ClockSync(
         lastRecommendedFrequencyMs = 0
         lastFrequencyChangeTimeMs = 0
         convergedAtTimeMs = 0
+    }
+
+    companion object {
+        /**
+         * Kalman tuning aligned with `time_sync.py` / the original Kotlin port defaults (pre-field-tuning).
+         * Unit tests should call this instead of [ClockSync] so assertions stay stable when production
+         * defaults change.
+         */
+        fun referenceFilter(): ClockSync = ClockSync(
+            processStdDev = 0.01,
+            driftProcessStdDev = 0.0,
+            forgetFactor = 1.001,
+            adaptiveCutoffFraction = 0.75,
+            minSamplesBeforeForgetting = 100,
+            maxErrorScale = 1.0
+        )
     }
 }

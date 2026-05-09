@@ -1060,9 +1060,9 @@ class SendspinPcmClient(
                 val rampedBasePlayoutOffsetUs = (playoutOffsetUs.toDouble() * startupRampFactor).toLong()
                 val totalPlayoutOffsetUs = rampedBasePlayoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
 
-                // Convert server timestamp to client time using Kalman filter offset
+                // Convert server timestamp to client time using Kalman filter offset (same client "now" as earlyUs)
                 val localPlayUs =
-                    clock.convertServerToClient(effectiveServerTsUs) + totalPlayoutOffsetUs
+                    clock.convertServerToClient(effectiveServerTsUs, nowUsForSchedule) + totalPlayoutOffsetUs
                 val now = nowUsForSchedule
                 val earlyUs = localPlayUs - now
 
@@ -1159,9 +1159,11 @@ class SendspinPcmClient(
 
                         // Apply same decode latency compensation during catch-up as during normal playback
                         val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
+                        val scheduleNowUs = nowUs()
                         val nextLocalPlayUs =
-                            clock.convertServerToClient(next.serverTimestampUs) + nextTotalPlayoutOffsetUs
-                        val nextEarlyUs = nextLocalPlayUs - nowUs()
+                            clock.convertServerToClient(next.serverTimestampUs, scheduleNowUs) +
+                                nextTotalPlayoutOffsetUs
+                        val nextEarlyUs = nextLocalPlayUs - scheduleNowUs
                         // Server-time lateness for the candidate chunk
                         val nextServerLatenessMs = -(nextEarlyUs - nextTotalPlayoutOffsetUs) / 1000L
                         dropped++
