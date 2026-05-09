@@ -1,9 +1,6 @@
 name: Release Checks
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_call:
 
 permissions:
