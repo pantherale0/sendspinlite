@@ -167,6 +167,11 @@ The app supports launch parameters for programmatic configuration:
 - **Time Sync**: `client/time`, `server/time`
 - **Stream Lifecycle**: `stream/start`, `stream/end`
 
+## Spec Conformance
+
+- Checklist: [docs/SPEC_CONFORMANCE.md](docs/SPEC_CONFORMANCE.md)
+- Spec reference: [sendspin/spec](https://github.com/sendspin/spec)
+
 ## Development Status
 
 This project is **stable**. Contributions and bug reports are welcome.
