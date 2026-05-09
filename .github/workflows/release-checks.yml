@@ -1,0 +1,76 @@
+name: Release Checks
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  release-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Run release unit tests
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Run release lint
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: ./gradlew lintRelease --stacktrace
+
+      - name: Build release APK
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/keystore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          KEYSTORE_CONTENT: ${{ secrets.KEYSTORE_FILE }}
+        run: |
+          if [ -n "$KEYSTORE_CONTENT" ]; then
+            echo "$KEYSTORE_CONTENT" | base64 -d > keystore.jks
+          fi
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Enforce APK size budget
+        run: |
+          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          MAX_SIZE_MB=100
+          APK_SIZE_BYTES=$(stat -c%s "$APK_PATH")
+          MAX_SIZE_BYTES=$((MAX_SIZE_MB * 1024 * 1024))
+          echo "APK size: $APK_SIZE_BYTES bytes"
+          if [ "$APK_SIZE_BYTES" -gt "$MAX_SIZE_BYTES" ]; then
+            echo "APK exceeds ${MAX_SIZE_MB}MB budget."
+            exit 1
+          fi
+
+      - name: Upload release check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-check-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-release.html
+            app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: warn
+          retention-days: 14

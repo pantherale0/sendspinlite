@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
-
     companion object {
         private const val PREFS_NAME = "SendspinPlayerPrefs"
         private const val KEY_WS_URL = "ws_url"
@@ -33,10 +32,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // -------------------------------------------------------------------------
 
     private val _updateInfo = MutableStateFlow<AutoUpdateManager.UpdateInfo?>(null)
+
     /** Non-null when a newer version has been found on GitHub. */
     val updateInfo: StateFlow<AutoUpdateManager.UpdateInfo?> = _updateInfo
 
     private val _autoUpdateEnabled = MutableStateFlow(AutoUpdateManager.isAutoUpdateEnabled(app))
+
     /** Whether the user has opted in to auto-downloading and installing updates. */
     val autoUpdateEnabled: StateFlow<Boolean> = _autoUpdateEnabled
 
@@ -83,9 +84,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Whether crash/ANR reporting to Sentry is available (DSN configured at build time). */
     val isCrashReportingAvailable: Boolean = CrashReportingManager.isCrashReportingAvailable()
 
-    private val _crashReportingEnabled = MutableStateFlow(
-        CrashReportingManager.isCrashReportingEnabled(app)
-    )
+    private val _crashReportingEnabled =
+        MutableStateFlow(
+            CrashReportingManager.isCrashReportingEnabled(app),
+        )
     val crashReportingEnabled: StateFlow<Boolean> = _crashReportingEnabled
 
     fun setCrashReportingEnabled(enabled: Boolean) {
@@ -106,7 +108,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val playbackState: String = "",
         val groupName: String = "",
         val streamDesc: String = "",
-        val offsetUncertaintyUs: Long = 0,  // Sync stability (uncertainty in microseconds)
+        // Sync stability (uncertainty in microseconds)
+        val offsetUncertaintyUs: Long = 0,
         val driftPpm: Double = 0.0,
         val driftUncertaintyPpm: Double = 0.0,
         val driftSnr: Double = 0.0,
@@ -117,8 +120,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val queuedChunks: Int = 0,
         val bufferAheadMs: Long = 0,
         val lateDrops: Long = 0,
-        val audibleSyncCount: Long = 0,  // Number of times an audible offset adjustment occurred
-        val kalmanErrorCount: Long = 0,  // Number of Kalman filter anomalies detected
+        // Number of times an audible offset adjustment occurred
+        val audibleSyncCount: Long = 0,
+        // Number of Kalman filter anomalies detected
+        val kalmanErrorCount: Long = 0,
         val enableOpusCodec: Boolean = DEFAULT_ENABLE_OPUS_CODEC,
         val hasController: Boolean = false,
         val groupVolume: Int = 100,
@@ -153,19 +158,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val smoothedLatencyMs: Double = 0.0,
         // Remote player delay (spec: static_delay_ms, 0-5000ms)
         val staticDelayMs: Long = DEFAULT_STATIC_DELAY_MS,
-        val staticDelayMsFromServer: Boolean = false
+        val staticDelayMsFromServer: Boolean = false,
     )
 
-    private val _ui = MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))
+    private val _ui =
+        MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))
     val ui: StateFlow<UiState> = _ui
-    
-    
+
     private fun checkIsLowMemoryDevice(): Boolean {
         return try {
             val activityManager = getApplication<Application>().getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
             val memInfo = android.app.ActivityManager.MemoryInfo()
             activityManager?.getMemoryInfo(memInfo)
-            memInfo?.totalMem ?: 0L < 1_500_000_000L  // Less than 1.5GB total RAM
+            memInfo?.totalMem ?: 0L < 1_500_000_000L // Less than 1.5GB total RAM
         } catch (e: Exception) {
             false
         }
@@ -209,56 +214,62 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            val localBinder = binder as? SendspinService.LocalBinder
-            service = localBinder?.getService()
-            serviceBound = true
+    private val serviceConnection =
+        object : ServiceConnection {
+            override fun onServiceConnected(
+                name: ComponentName?,
+                binder: IBinder?,
+            ) {
+                val localBinder = binder as? SendspinService.LocalBinder
+                service = localBinder?.getService()
+                serviceBound = true
 
-            service?.let { svc ->
-                viewModelScope.launch {
-                    svc.uiState.collect { serviceState ->
-                        // Volume and mute changes are now handled directly in the service
-                        // This ensures they work even when the app UI is not open (e.g., after boot)
-                        // Just update the UI state to reflect current state
-                        
-                        // Only update player volume from service if it's from the server
-                        // This prevents service state from overwriting local UI volume
-                        if (serviceState.playerVolumeFromServer || _ui.value.playerVolume == 100) {
-                            _ui.value = serviceState
-                        } else {
-                            // Keep local volume, update everything else
-                            _ui.value = serviceState.copy(
-                                playerVolume = _ui.value.playerVolume,
-                                playerVolumeFromServer = false
-                            )
+                service?.let { svc ->
+                    viewModelScope.launch {
+                        svc.uiState.collect { serviceState ->
+                            // Volume and mute changes are now handled directly in the service
+                            // This ensures they work even when the app UI is not open (e.g., after boot)
+                            // Just update the UI state to reflect current state
+
+                            // Only update player volume from service if it's from the server
+                            // This prevents service state from overwriting local UI volume
+                            if (serviceState.playerVolumeFromServer || _ui.value.playerVolume == 100) {
+                                _ui.value = serviceState
+                            } else {
+                                // Keep local volume, update everything else
+                                _ui.value =
+                                    serviceState.copy(
+                                        playerVolume = _ui.value.playerVolume,
+                                        playerVolumeFromServer = false,
+                                    )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        override fun onServiceDisconnected(name: ComponentName?) {
-            service = null
-            serviceBound = false
+            override fun onServiceDisconnected(name: ComponentName?) {
+                service = null
+                serviceBound = false
+            }
         }
-    }
 
     init {
         // Load saved settings from SharedPreferences
         val savedWsUrl = sharedPrefs.getString(KEY_WS_URL, null)
         val savedEnableOpusCodec = sharedPrefs.getBoolean(KEY_ENABLE_OPUS_CODEC, DEFAULT_ENABLE_OPUS_CODEC)
         val savedStaticDelayMs = sharedPrefs.getLong(KEY_STATIC_DELAY_MS, DEFAULT_STATIC_DELAY_MS)
-        
+
         // Initialize with saved URL and Opus codec preference if available
-        _ui.value = _ui.value.copy(
-            wsUrl = savedWsUrl ?: "",
-            clientId = deviceId,
-            clientName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
-            enableOpusCodec = savedEnableOpusCodec,
-            staticDelayMs = savedStaticDelayMs
-        )
-        
+        _ui.value =
+            _ui.value.copy(
+                wsUrl = savedWsUrl ?: "",
+                clientId = deviceId,
+                clientName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                enableOpusCodec = savedEnableOpusCodec,
+                staticDelayMs = savedStaticDelayMs,
+            )
+
         updateAndroidVolumeState()
 
         // If we have a saved server URL, connect to it immediately
@@ -268,14 +279,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
         // Start mDNS service discovery
         serviceDiscovery.startDiscovery()
-        
+
         // Set a 5-second timeout for discovery
         viewModelScope.launch {
             kotlinx.coroutines.delay(5000) // 5 seconds
             // Mark that discovery timeout has expired (this allows fallback to manual entry)
             _ui.value = _ui.value.copy(discoveryTimeoutExpired = true)
         }
-        
+
         // Monitor discovered servers and auto-connect to the first one
         viewModelScope.launch {
             serviceDiscovery.discoveredServers.collect { servers ->
@@ -283,7 +294,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 // Auto-connect to the first discovered server if not already connected
                 if (!currentState.connected && servers.isNotEmpty()) {
                     val firstServer = servers.first()
-                    
+
                     // Connect to first discovered server
                     connect(firstServer.url)
                 }
@@ -311,13 +322,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             putString(KEY_WS_URL, wsUrl)
             apply()
         }
-        
+
         // Bind to service before starting it
         if (!serviceBound) {
             val intent = Intent(getApplication(), SendspinService::class.java)
             getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
-        
+
         SendspinService.startService(getApplication(), wsUrl, deviceId, "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
     }
 
@@ -327,14 +338,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun disconnect() {
         SendspinService.stopService(getApplication())
-        
+
         // Unbind from service when disconnecting
         if (serviceBound) {
             getApplication<Application>().unbindService(serviceConnection)
             serviceBound = false
             service = null
         }
-        
+
         _ui.value = _ui.value.copy(connected = false, status = "disconnected")
     }
 

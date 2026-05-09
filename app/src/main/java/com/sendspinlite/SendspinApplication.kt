@@ -7,7 +7,6 @@ import android.app.Application
  * Responsible for early initialisation of cross-cutting concerns such as crash reporting.
  */
 class SendspinApplication : Application() {
-
     override fun onCreate() {
         super.onCreate()
         // Initialise Sentry crash/ANR reporting only if the user has previously opted in.

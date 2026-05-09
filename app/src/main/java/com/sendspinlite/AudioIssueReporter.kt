@@ -9,8 +9,8 @@ import io.sentry.Attachment
 import io.sentry.Hint
 import io.sentry.Sentry
 import io.sentry.SentryEvent
-import io.sentry.protocol.SentryId
 import io.sentry.SentryLevel
+import io.sentry.protocol.SentryId
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -25,7 +25,6 @@ import java.util.Locale
  * intentionally excluded so that the report contains no personal data.
  */
 object AudioIssueReporter {
-
     private const val TAG = "AudioIssueReporter"
     private const val REPORT_FILE = "sendspin_audio_report.txt"
 
@@ -94,20 +93,21 @@ object AudioIssueReporter {
         // audio subsystem lines are included.
         sb.appendLine("=== AUDIO LOGCAT (filtered) ===")
         try {
-            val process = Runtime.getRuntime().exec(
-                arrayOf(
-                    "logcat", "-d", "-t", "500",
-                    "SendspinPcmClient:V",
-                    "PlayerViewModel:V",
-                    "CrashReportingManager:V",
-                    "AudioIssueReporter:V",
-                    "AudioTrack:V",
-                    "AudioRecord:V",
-                    "AudioFlinger:V",
-                    "AudioPolicyManager:V",
-                    "*:S"
+            val process =
+                Runtime.getRuntime().exec(
+                    arrayOf(
+                        "logcat", "-d", "-t", "500",
+                        "SendspinPcmClient:V",
+                        "PlayerViewModel:V",
+                        "CrashReportingManager:V",
+                        "AudioIssueReporter:V",
+                        "AudioTrack:V",
+                        "AudioRecord:V",
+                        "AudioFlinger:V",
+                        "AudioPolicyManager:V",
+                        "*:S",
+                    ),
                 )
-            )
             val logs = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             process.destroy()
@@ -130,14 +130,15 @@ object AudioIssueReporter {
     fun uploadToSentry(report: String): String? {
         if (!CrashReportingManager.isCrashReportingAvailable()) return null
         return try {
-            val event = SentryEvent().apply {
-                level = SentryLevel.WARNING
-                message = io.sentry.protocol.Message().apply { message = "Audio issue report" }
-                setExtra("audio_report_tail", lastLines(report, 50))
-                setExtra("app_version", BuildConfig.VERSION_NAME)
-                setExtra("android_version", Build.VERSION.RELEASE)
-                setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
-            }
+            val event =
+                SentryEvent().apply {
+                    level = SentryLevel.WARNING
+                    message = io.sentry.protocol.Message().apply { message = "Audio issue report" }
+                    setExtra("audio_report_tail", lastLines(report, 50))
+                    setExtra("app_version", BuildConfig.VERSION_NAME)
+                    setExtra("android_version", Build.VERSION.RELEASE)
+                    setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+                }
             val hint = Hint()
             hint.addAttachment(Attachment(report.toByteArray(Charsets.UTF_8), "audio_report.txt", "text/plain"))
             val id: SentryId = Sentry.captureEvent(event, hint)
@@ -154,7 +155,10 @@ object AudioIssueReporter {
      * Write [report] to a private storage file and return a shareable content [Uri]
      * (via [FileProvider]), or `null` on failure.
      */
-    fun saveReportToFile(context: Context, report: String): Uri? {
+    fun saveReportToFile(
+        context: Context,
+        report: String,
+    ): Uri? {
         return try {
             val file = File(context.filesDir, REPORT_FILE)
             file.writeText(report)

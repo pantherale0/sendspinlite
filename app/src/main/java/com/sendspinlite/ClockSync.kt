@@ -8,18 +8,18 @@ import kotlin.math.sqrt
  * Network condition quality levels.
  */
 enum class NetworkQuality {
-    GOOD,       // Low latency, low jitter
-    FAIR,       // Moderate latency or jitter
-    POOR        // High latency or jitter
+    GOOD, // Low latency, low jitter
+    FAIR, // Moderate latency or jitter
+    POOR, // High latency or jitter
 }
 
 /**
  * Clock stability states.
  */
 enum class ClockStability {
-    UNSTABLE,   // High drift uncertainty
+    UNSTABLE, // High drift uncertainty
     CONVERGING, // Drift uncertainty decreasing
-    STABLE      // Drift well-estimated
+    STABLE, // Drift well-estimated
 }
 
 /**
@@ -29,7 +29,7 @@ enum class ClockStability {
 private data class TimeElement(
     val lastUpdate: Long = 0,
     val offset: Double = 0.0,
-    val drift: Double = 0.0
+    val drift: Double = 0.0,
 )
 
 /**
@@ -57,7 +57,7 @@ class ClockSync(
     private val forgetFactor: Double = 2.0,
     private val adaptiveCutoffFraction: Double = 3.0,
     private val minSamplesBeforeForgetting: Int = 100,
-    private val maxErrorScale: Double = 0.5
+    private val maxErrorScale: Double = 0.5,
 ) {
     private val tag = "ClockSync"
 
@@ -66,22 +66,22 @@ class ClockSync(
     private val driftProcessVariancePerUs: Double = driftProcessStdDev * driftProcessStdDev
 
     // Kalman filter state -- mirrors reference fields exactly
-    private var lastUpdateUs: Long = 0          // _last_update
-    private var updateCount: Int = 0            // _count
-    private var offset: Double = 0.0            // _offset
-    private var drift: Double = 0.0             // _drift
-    
+    private var lastUpdateUs: Long = 0 // _last_update
+    private var updateCount: Int = 0 // _count
+    private var offset: Double = 0.0 // _offset
+    private var drift: Double = 0.0 // _drift
+
     // Baseline offset: the first measurement used to normalize all subsequent offsets
     // This converts the huge monotonic clock difference into small millisecond sync values
-    private var baselineOffsetUs: Long? = null  // Captured on first measurement
-    
+    private var baselineOffsetUs: Long? = null // Captured on first measurement
+
     // Debug counter for timestamp conversion logging
     private var conversionDebugCount = 0
 
     // Covariance matrix P (2x2, stored as 3 independent entries)
-    private var offsetCovariance: Double = Double.POSITIVE_INFINITY      // _offset_covariance
-    private var offsetDriftCovariance: Double = 0.0                      // _offset_drift_covariance
-    private var driftCovariance: Double = 0.0                            // _drift_covariance
+    private var offsetCovariance: Double = Double.POSITIVE_INFINITY // _offset_covariance
+    private var offsetDriftCovariance: Double = 0.0 // _offset_drift_covariance
+    private var driftCovariance: Double = 0.0 // _drift_covariance
 
     // Snapshot for lock-free reads by convertServerToClient / convertClientToServer
     @Volatile
@@ -91,7 +91,7 @@ class ClockSync(
     private var lastMeasurementUs: Double = 0.0
     private var lastMaxErrorUs: Long = 0
     private var lastResidualUs: Double = 0.0
-    private var kalmanErrorCount: Long = 0  // Count of large residuals indicating filter anomalies
+    private var kalmanErrorCount: Long = 0 // Count of large residuals indicating filter anomalies
 
     fun getKalmanErrorCount(): Long = kalmanErrorCount
 
@@ -99,10 +99,13 @@ class ClockSync(
     private val networkMetricsLock = Any()
     private val rttHistory = ArrayDeque<Long>(20)
     private val maxErrorHistory = ArrayDeque<Long>(20)
+
     @Volatile
     private var estimatedNetworkJitterUs: Long = 0
+
     @Volatile
     private var averageRttUs: Long = 0
+
     @Volatile
     private var cachedNetworkQuality: NetworkQuality = NetworkQuality.FAIR
 
@@ -130,20 +133,22 @@ class ClockSync(
         clientTransmittedUs: Long,
         clientReceivedUs: Long,
         serverReceivedUs: Long,
-        serverTransmittedUs: Long
+        serverTransmittedUs: Long,
     ) {
         // NTP offset (client - server, not server - client):
         // This gives the SMALL clock difference we need for sync, not the huge monotonic difference
-        val measurement = (
-            (clientTransmittedUs - serverReceivedUs)
-            + (clientReceivedUs - serverTransmittedUs)
-        ) / 2
+        val measurement =
+            (
+                (clientTransmittedUs - serverReceivedUs) +
+                    (clientReceivedUs - serverTransmittedUs)
+            ) / 2
 
         // Half round-trip (max error): ((T4 - T1) - (T3 - T2)) / 2
-        val maxError = (
-            (clientReceivedUs - clientTransmittedUs)
-            - (serverTransmittedUs - serverReceivedUs)
-        ) / 2
+        val maxError =
+            (
+                (clientReceivedUs - clientTransmittedUs) -
+                    (serverTransmittedUs - serverReceivedUs)
+            ) / 2
 
         // time_added = T4 (client timestamp when measurement was taken)
         update(measurement, maxError, clientReceivedUs)
@@ -158,24 +163,30 @@ class ClockSync(
      * Uses multi-sample initialization (5-10 measurements) before computing drift
      * to avoid locking onto a bad offset from noisy early measurements.
      */
-    private fun update(measurement: Long, maxError: Long, timeAddedUs: Long) {
-        if (timeAddedUs == lastUpdateUs) return   // skip duplicate timestamps
+    private fun update(
+        measurement: Long,
+        maxError: Long,
+        timeAddedUs: Long,
+    ) {
+        if (timeAddedUs == lastUpdateUs) return // skip duplicate timestamps
 
         // Reject extreme outliers: if maxError (half-RTT) is much larger than recent RTT history.
         // Keep lock hold short by taking a snapshot and doing expensive work outside the lock.
         val rtt = 2 * maxError
         var medianRtt: Long? = null
         if (hasConverged()) {
-            val rttSnapshot = synchronized(networkMetricsLock) {
-                if (rttHistory.size >= 10) rttHistory.toList() else emptyList()
-            }
+            val rttSnapshot =
+                synchronized(networkMetricsLock) {
+                    if (rttHistory.size >= 10) rttHistory.toList() else emptyList()
+                }
             if (rttSnapshot.isNotEmpty()) {
                 val sorted = rttSnapshot.sorted()
-                medianRtt = if (sorted.size % 2 == 0) {
-                    (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
-                } else {
-                    sorted[sorted.size / 2]
-                }
+                medianRtt =
+                    if (sorted.size % 2 == 0) {
+                        (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
+                    } else {
+                        sorted[sorted.size / 2]
+                    }
                 if (medianRtt > 0L && rtt > 4.0 * medianRtt) {
                     Log.w(tag, "Extreme outlier rejected: rtt=${rtt}us vs median=${medianRtt}us (factor=${rtt.toDouble() / medianRtt})")
                     return
@@ -197,19 +208,23 @@ class ClockSync(
                 estimatedNetworkJitterUs = sqrt(variance).toLong()
             }
 
-            cachedNetworkQuality = if (maxErrorHistory.isEmpty()) {
-                NetworkQuality.FAIR
-            } else {
-                val avgMaxError = maxErrorHistory.average().toLong()
-                val maxJitter = if (rttHistory.size >= 2) {
-                    (rttHistory.maxOrNull() ?: 0L) - (rttHistory.minOrNull() ?: 0L)
-                } else 0L
-                when {
-                    avgMaxError < 20_000 && maxJitter < 20_000 -> NetworkQuality.GOOD
-                    avgMaxError > 100_000 || maxJitter > 50_000 -> NetworkQuality.POOR
-                    else -> NetworkQuality.FAIR
+            cachedNetworkQuality =
+                if (maxErrorHistory.isEmpty()) {
+                    NetworkQuality.FAIR
+                } else {
+                    val avgMaxError = maxErrorHistory.average().toLong()
+                    val maxJitter =
+                        if (rttHistory.size >= 2) {
+                            (rttHistory.maxOrNull() ?: 0L) - (rttHistory.minOrNull() ?: 0L)
+                        } else {
+                            0L
+                        }
+                    when {
+                        avgMaxError < 20_000 && maxJitter < 20_000 -> NetworkQuality.GOOD
+                        avgMaxError > 100_000 || maxJitter > 50_000 -> NetworkQuality.POOR
+                        else -> NetworkQuality.FAIR
+                    }
                 }
-            }
         }
 
         val dt: Double = (timeAddedUs - lastUpdateUs).toDouble()
@@ -223,14 +238,14 @@ class ClockSync(
         // This prevents locking onto a noisy measurement and then being unable to recover.
         if (updateCount < 8) {
             updateCount++
-            
+
             // Normalize measurement: subtract baseline to get small sync error
             // First measurement sets the baseline (will be near-zero after normalization)
             if (baselineOffsetUs == null) {
                 baselineOffsetUs = measurement
             }
             val normalizedMeasurement = measurement - baselineOffsetUs!!
-            
+
             if (updateCount == 1) {
                 // First measurement: initialize with normalized value (will be ~0)
                 offset = normalizedMeasurement.toDouble()
@@ -243,35 +258,36 @@ class ClockSync(
                 Log.i(tag, "Init [1/8]: offset=${normalizedMeasurement}us (raw=${measurement}us, baseline=${baselineOffsetUs}us)")
                 return
             }
-            
+
             // Measurements 2-8: average the normalized measurements to get stable baseline offset
             // This acts as a low-pass filter rejecting noisy early RTT spikes
-            val alpha = 1.0 / updateCount  // Exponential moving average weight
+            val alpha = 1.0 / updateCount // Exponential moving average weight
             offset = offset * (1.0 - alpha) + normalizedMeasurement.toDouble() * alpha
-            
+
             // Update uncertainty to be variance of measurements
             offsetCovariance = offsetCovariance * (1.0 - alpha) + measurementVariance * alpha
-            
+
             // Keep drift at zero during initialization
             drift = 0.0
             driftCovariance = 0.0
             offsetDriftCovariance = 0.0
-            
+
             lastMeasurementUs = normalizedMeasurement.toDouble()
             lastMaxErrorUs = maxError
             Log.i(tag, "Init [$updateCount/8]: offset=${offset.toLong()}us")
-            
+
             if (updateCount == 8) {
                 // After 8 measurements, we have a stable offset baseline
                 // Initialize Kalman covariance matrix for full filter
-                offsetCovariance = offsetCovariance.coerceAtLeast(100.0)  // Measurement uncertainty
-                driftCovariance = 1.0  // Start learning drift
+                offsetCovariance = offsetCovariance.coerceAtLeast(100.0) // Measurement uncertainty
+                driftCovariance = 1.0 // Start learning drift
                 offsetDriftCovariance = 0.0
-                drift = 0.0  // Start drift estimation from zero
-                
-                currentTimeElement = TimeElement(
-                    lastUpdate = lastUpdateUs, offset = offset, drift = drift
-                )
+                drift = 0.0 // Start drift estimation from zero
+
+                currentTimeElement =
+                    TimeElement(
+                        lastUpdate = lastUpdateUs, offset = offset, drift = drift,
+                    )
                 Log.i(tag, "Initialization complete: offset=${offset.toLong()}us, starting Kalman filter for continuous drift tracking")
             }
             return
@@ -280,7 +296,7 @@ class ClockSync(
         // --- Full Kalman filter (count >= 9) ---
         // Continuously track both offset AND drift using standard Kalman predict-correct
         updateCount++
-        
+
         // Normalize measurement relative to baseline for consistent sync values
         val normalizedMeasurement = measurement - baselineOffsetUs!!
 
@@ -300,9 +316,9 @@ class ClockSync(
         val offsetProcessVariance: Double = dt * processVariance
         val newOffsetCovariance: Double =
             offsetCovariance +
-            2.0 * offsetDriftCovariance * dt +
-            driftCovariance * dtSquared +
-            offsetProcessVariance
+                2.0 * offsetDriftCovariance * dt +
+                driftCovariance * dtSquared +
+                offsetProcessVariance
 
         // == Innovation & adaptive forgetting ==
         val residual: Double = normalizedMeasurement.toDouble() - predictedOffset
@@ -350,9 +366,10 @@ class ClockSync(
         offsetCovariance = covOff - offsetGain * covOff
 
         // Publish snapshot for lock-free reads
-        currentTimeElement = TimeElement(
-            lastUpdate = lastUpdateUs, offset = offset, drift = drift
-        )
+        currentTimeElement =
+            TimeElement(
+                lastUpdate = lastUpdateUs, offset = offset, drift = drift,
+            )
 
         lastMeasurementUs = measurement.toDouble()
         lastMaxErrorUs = maxError
@@ -372,19 +389,26 @@ class ClockSync(
     /**
      * Convert a server timestamp to the equivalent client timestamp.
      * client_time = server_time + baseline + offset
+     *
+     * Drift extrapolation uses `clientNowMonotonicUs - lastUpdate`; both must use the same client
+     * monotonic microsecond clock as [onServerTime] (this app: `System.nanoTime() / 1000`).
+     * Pass the same "now" used for surrounding scheduling math (see [convertClientToServer]).
      */
-    fun convertServerToClient(serverTimeUs: Long): Long {
+    fun convertServerToClient(
+        serverTimeUs: Long,
+        clientNowMonotonicUs: Long = System.nanoTime() / 1000L,
+    ): Long {
         val te = currentTimeElement
         val baseline = baselineOffsetUs ?: 0L
-        val dt = (System.nanoTime() / 1000L - te.lastUpdate).toDouble()
+        val dt = (clientNowMonotonicUs - te.lastUpdate).toDouble()
         val fullOffset = baseline + (te.offset + te.drift * dt).toLong()
         val result = serverTimeUs + fullOffset
-        
+
         if (conversionDebugCount < 3) {
             conversionDebugCount++
             Log.d(tag, "convertServerToClient: server=$serverTimeUs baseline=$baseline offset=${te.offset.toLong()}us -> client=$result")
         }
-        
+
         return result
     }
 
@@ -440,16 +464,18 @@ class ClockSync(
         if (!hasConverged()) {
             intervalMs = 50L
         } else {
-            intervalMs = when (getNetworkConditionQuality()) {
-                NetworkQuality.POOR -> 150L
-                NetworkQuality.GOOD -> 500L
-                NetworkQuality.FAIR -> 250L
-            }
-            intervalMs = when (getClockStability()) {
-                ClockStability.UNSTABLE -> (intervalMs * 0.8).toLong()
-                ClockStability.CONVERGING -> intervalMs
-                ClockStability.STABLE -> (intervalMs * 1.2).toLong()
-            }
+            intervalMs =
+                when (getNetworkConditionQuality()) {
+                    NetworkQuality.POOR -> 150L
+                    NetworkQuality.GOOD -> 500L
+                    NetworkQuality.FAIR -> 250L
+                }
+            intervalMs =
+                when (getClockStability()) {
+                    ClockStability.UNSTABLE -> (intervalMs * 0.8).toLong()
+                    ClockStability.CONVERGING -> intervalMs
+                    ClockStability.STABLE -> (intervalMs * 1.2).toLong()
+                }
         }
         intervalMs = intervalMs.coerceIn(25L, 2000L)
 
@@ -472,6 +498,7 @@ class ClockSync(
     }
 
     fun getLastRecommendedFrequencyMs(): Long = lastRecommendedFrequencyMs
+
     fun getEstimatedNetworkJitterUs(): Long = estimatedNetworkJitterUs
 
     /** Get the average RTT from recent measurements. Returns 0 if no data. */
@@ -504,5 +531,22 @@ class ClockSync(
         lastRecommendedFrequencyMs = 0
         lastFrequencyChangeTimeMs = 0
         convergedAtTimeMs = 0
+    }
+
+    companion object {
+        /**
+         * Kalman tuning aligned with `time_sync.py` / the original Kotlin port defaults (pre-field-tuning).
+         * Unit tests should call this instead of [ClockSync] so assertions stay stable when production
+         * defaults change.
+         */
+        fun referenceFilter(): ClockSync =
+            ClockSync(
+                processStdDev = 0.01,
+                driftProcessStdDev = 0.0,
+                forgetFactor = 1.001,
+                adaptiveCutoffFraction = 0.75,
+                minSamplesBeforeForgetting = 100,
+                maxErrorScale = 1.0,
+            )
     }
 }

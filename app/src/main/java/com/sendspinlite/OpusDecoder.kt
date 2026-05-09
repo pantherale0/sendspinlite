@@ -1,28 +1,30 @@
 package com.sendspinlite
 
 import android.util.Log
-//import org.concentus.OpusDecoder as ConcentusDecoder
-import io.github.jaredmdobson.concentus.OpusDecoder as ConcentusDecoder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import io.github.jaredmdobson.concentus.OpusDecoder as ConcentusDecoder
 
 /**
  * Opus decoder wrapper using Concentus (pure Java Opus implementation).
  * Decodes Opus frames to 16-bit PCM.
+ *
+ * Alternate dependency option (unused): `org.concentus.OpusDecoder` as ConcentusDecoder.
  */
 class OpusDecoder(
     private val sampleRate: Int,
-    private val channels: Int
+    private val channels: Int,
 ) {
     private val tag = "OpusDecoder"
 
     // Concentus decoder instance
-    private val decoder = try {
-        ConcentusDecoder(sampleRate, channels)
-    } catch (e: Exception) {
-        Log.e(tag, "Failed to create Opus decoder", e)
-        throw e
-    }
+    private val decoder =
+        try {
+            ConcentusDecoder(sampleRate, channels)
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to create Opus decoder", e)
+            throw e
+        }
 
     /**
      * Decode an Opus frame to PCM samples.
@@ -36,15 +38,17 @@ class OpusDecoder(
             val pcmSamples = ShortArray(maxFrameSize * channels)
 
             // Decode Opus frame to PCM samples
-            val samplesDecoded = decoder.decode(
-                opusData,
-                0,
-                opusData.size,
-                pcmSamples,
-                0,
-                maxFrameSize,
-                false // No FEC for now
-            )
+            val samplesDecoded =
+                decoder.decode(
+                    opusData,
+                    0,
+                    opusData.size,
+                    pcmSamples,
+                    0,
+                    maxFrameSize,
+                    // No FEC for now
+                    false,
+                )
 
             if (samplesDecoded < 0) {
                 Log.e(tag, "Decode error: $samplesDecoded")

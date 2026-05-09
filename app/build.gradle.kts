@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.gitlab.arturbosch.detekt")
+    id("org.jlleitschuh.gradle.ktlint")
 }
 
 android {
@@ -14,6 +16,7 @@ android {
         targetSdk = 36
         versionCode = 17
         versionName = "1.7"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Sentry DSN — set via environment variable SENTRY_DSN or leave empty to disable crash reporting
         buildConfigField("String", "SENTRY_DSN", "\"${System.getenv("SENTRY_DSN") ?: ""}\"")
@@ -33,9 +36,18 @@ android {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("release")
+            val hasSigningEnv =
+                listOf(
+                    "KEYSTORE_FILE",
+                    "KEYSTORE_PASSWORD",
+                    "KEY_ALIAS",
+                    "KEY_PASSWORD",
+                ).all { !System.getenv(it).isNullOrBlank() }
+            if (hasSigningEnv) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -45,17 +57,17 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 
-    buildFeatures {
-        compose = true
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.isReturnDefaultValues = true
     }
-
 }
 
 dependencies {
@@ -92,4 +104,35 @@ dependencies {
 
     // androidx.media 1.6.0+ has ashmem pinning fixes and supports API 14+
     implementation("androidx.media:media:1.6.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("io.mockk:mockk:1.13.12")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.6.4")
+    testImplementation("com.google.truth:truth:1.4.4")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.0.5")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.0.5")
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    baseline = file("$rootDir/config/detekt/baseline.xml")
+}
+
+ktlint {
+    android.set(true)
+    ignoreFailures.set(false)
+}
+
+tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    jvmTarget = "17"
+}
+
+tasks.withType<io.gitlab.arturbosch.detekt.DetektCreateBaselineTask>().configureEach {
+    jvmTarget = "17"
 }

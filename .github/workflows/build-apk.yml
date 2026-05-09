@@ -55,4 +55,4 @@ jobs:
           name: SendSpin-Lite-${{ steps.version.outputs.version_name }}-build-${{ steps.version.outputs.version_code }}
           path: com.sendspinlite-${{ steps.version.outputs.version_code }}-v${{ steps.version.outputs.version_name }}.apk
           compression-level: 0
-          retention-days: 5
+          retention-days: 2

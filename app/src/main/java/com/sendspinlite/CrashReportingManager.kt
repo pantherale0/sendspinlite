@@ -26,7 +26,6 @@ import java.util.Locale
  * via the SENTRY_DSN environment variable; if it is empty, crash reporting is unavailable.
  */
 object CrashReportingManager {
-
     private const val TAG = "CrashReportingManager"
     private const val PREFS_NAME = "SendspinPlayerPrefs"
     const val KEY_CRASH_REPORTING_ENABLED = "crash_reporting_enabled"
@@ -45,7 +44,10 @@ object CrashReportingManager {
      * Enable or disable Sentry crash reporting.
      * Enabling initialises Sentry immediately; disabling closes the current SDK instance.
      */
-    fun setCrashReportingEnabled(context: Context, enabled: Boolean) {
+    fun setCrashReportingEnabled(
+        context: Context,
+        enabled: Boolean,
+    ) {
         prefs(context).edit().putBoolean(KEY_CRASH_REPORTING_ENABLED, enabled).apply()
         if (enabled) {
             initSentry(context)
@@ -89,14 +91,15 @@ object CrashReportingManager {
         }
         try {
             val report = file.readText()
-            val event = SentryEvent().apply {
-                level = SentryLevel.FATAL
-                message = io.sentry.protocol.Message().apply { message = "Crash report" }
-                setExtra("crash_report_tail", lastLines(report, 50))
-                setExtra("app_version", BuildConfig.VERSION_NAME)
-                setExtra("android_version", Build.VERSION.RELEASE)
-                setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
-            }
+            val event =
+                SentryEvent().apply {
+                    level = SentryLevel.FATAL
+                    message = io.sentry.protocol.Message().apply { message = "Crash report" }
+                    setExtra("crash_report_tail", lastLines(report, 50))
+                    setExtra("app_version", BuildConfig.VERSION_NAME)
+                    setExtra("android_version", Build.VERSION.RELEASE)
+                    setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+                }
             val hint = Hint()
             hint.addAttachment(Attachment(report.toByteArray(Charsets.UTF_8), "crash_report.txt", "text/plain"))
             Sentry.captureEvent(event, hint)
@@ -112,8 +115,7 @@ object CrashReportingManager {
     // Private helpers
     // -------------------------------------------------------------------------
 
-    private fun prefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun prefs(context: Context): SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
      * Returns the [File] that crash reports are written to / read from.
@@ -127,20 +129,21 @@ object CrashReportingManager {
      * private internal files directory is used as a fallback.
      */
     private fun getCrashReportFile(context: Context): File {
-        val dir: File = when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
-                // API 29+: app-specific external dir — no permission required, visible in file manager
-                context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-                    ?: context.filesDir
-            }
-            Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED &&
+        val dir: File =
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                    // API 29+: app-specific external dir — no permission required, visible in file manager
+                    context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                        ?: context.filesDir
+                }
+                Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED &&
                     context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
                     PackageManager.PERMISSION_GRANTED -> {
-                // API < 29 with storage permission: public Documents folder on /sdcard
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                    // API < 29 with storage permission: public Documents folder on /sdcard
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                }
+                else -> context.filesDir
             }
-            else -> context.filesDir
-        }
         if (!dir.exists() && !dir.mkdirs()) {
             Log.w(TAG, "Could not create crash report directory: ${dir.absolutePath}; falling back to filesDir")
             return File(context.filesDir, CRASH_REPORT_FILE)
@@ -156,10 +159,10 @@ object CrashReportingManager {
         }
         SentryAndroid.init(context) { options: SentryAndroidOptions ->
             options.dsn = dsn
-            options.isEnableAutoSessionTracking = false   // Disable session tracking for privacy
-            options.isAnrEnabled = true                   // detect ANR (App Not Responding) events
-            options.isAttachScreenshot = false            // do not capture screenshots
-            options.isSendDefaultPii = false              // no PII
+            options.isEnableAutoSessionTracking = false // Disable session tracking for privacy
+            options.isAnrEnabled = true // detect ANR (App Not Responding) events
+            options.isAttachScreenshot = false // do not capture screenshots
+            options.isSendDefaultPii = false // no PII
             options.release = "sendspin-lite@${BuildConfig.VERSION_NAME}"
             options.environment = "production"
         }
@@ -186,7 +189,11 @@ object CrashReportingManager {
         }
     }
 
-    private fun writeCrashReport(context: Context, thread: Thread, throwable: Throwable) {
+    private fun writeCrashReport(
+        context: Context,
+        thread: Thread,
+        throwable: Throwable,
+    ) {
         val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
         val sb = StringBuilder()
         sb.appendLine("=== Sendspin Lite Crash Report ===")

@@ -8,16 +8,16 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.ComponentCallbacks2
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.content.Context
-import android.content.pm.ServiceInfo
-import android.os.Binder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -40,7 +40,7 @@ class SendspinService : Service() {
     // Detect low-memory devices to disable expensive features (initialized in onCreate)
     private var isLowMemoryDevice = false
     private var isTV = false
-    
+
     // Reconnection retry tracking
     private var reconnectJob: Job? = null
     private var reconnectRetryCount = 0
@@ -49,13 +49,13 @@ class SendspinService : Service() {
     // Connection drop tracking
     private var hasEstablishedConnection = false
     private var dropCountedForCurrentOutage = false
-    
+
     private fun checkIsLowMemoryDevice(): Boolean {
         return try {
             val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             val memInfo = ActivityManager.MemoryInfo()
             activityManager?.getMemoryInfo(memInfo)
-            val lowMemory = memInfo?.totalMem ?: 0L < 2_000_000_000L  // Less than 2GB total RAM
+            val lowMemory = memInfo?.totalMem ?: 0L < 2_000_000_000L // Less than 2GB total RAM
             if (lowMemory) {
                 Log.i(tag, "Low-memory device detected: disabling artwork and action buttons")
             }
@@ -85,20 +85,21 @@ class SendspinService : Service() {
 
     // Track if service was started from boot context to handle Android 12+ restrictions
     private var startedFromBoot: Boolean = false
-    
+
     // Network connectivity receiver for auto-reconnect
     private var connectivityReceiver: BroadcastReceiver? = null
     private var lastNetworkState: Boolean = false
-    
+
     private var volumeChangeReceiver: BroadcastReceiver? = null
+
     @Volatile
     private var lastServerVolumeSetMs: Long = 0L
     private val volumeSuppressWindowMs: Long = 500L
-    
+
     // Track the last connection URL to prevent duplicate connections
     private var lastConnectUrl: String? = null
     private var lastConnectTime: Long = 0
-    
+
     // Store reference to unregister in onDestroy and prevent leak
     private var memoryTrimCallback: android.content.ComponentCallbacks2? = null
 
@@ -108,19 +109,26 @@ class SendspinService : Service() {
         val playbackState: String?,
         val hasController: Boolean,
         val supportedCommands: Set<String>,
-        val artworkBitmap: Any? // Using Any to avoid bitmap comparison issues
+        // Using Any to avoid bitmap comparison issues
+        val artworkBitmap: Any?,
     )
 
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "sendspin_playback"
 
-        fun startService(context: Context, wsUrl: String, clientId: String, clientName: String) {
-            val intent = Intent(context, SendspinService::class.java).apply {
-                putExtra("wsUrl", wsUrl)
-                putExtra("clientId", clientId)
-                putExtra("clientName", clientName)
-            }
+        fun startService(
+            context: Context,
+            wsUrl: String,
+            clientId: String,
+            clientName: String,
+        ) {
+            val intent =
+                Intent(context, SendspinService::class.java).apply {
+                    putExtra("wsUrl", wsUrl)
+                    putExtra("clientId", clientId)
+                    putExtra("clientName", clientName)
+                }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -140,25 +148,26 @@ class SendspinService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(tag, "Service created")
-        
+
         // Initialize low-memory detection now that context is ready
         isTV = checkIsTV()
         isLowMemoryDevice = checkIsLowMemoryDevice()
-        
+
         createNotificationChannel()
 
         // Acquire wake lock to keep CPU running during playback
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "SendspinService::WakeLock"
-        ).apply {
-            setReferenceCounted(false)
-        }
+        wakeLock =
+            powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "SendspinService::WakeLock",
+            ).apply {
+                setReferenceCounted(false)
+            }
 
         // Register network connectivity receiver
         registerNetworkReceiver()
-        
+
         // Register volume change receiver for background volume monitoring
         registerVolumeChangeReceiver()
 
@@ -176,7 +185,7 @@ class SendspinService : Service() {
                 }
             }
         }
-        
+
         // Monitor for server-commanded volume/mute changes and apply them to system
         // This allows volume control to work even when MainActivity is not running (e.g., after boot)
         scope.launch {
@@ -189,11 +198,11 @@ class SendspinService : Service() {
                     audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, systemVolume, 0)
                     Log.i(tag, "Applied server volume command: ${state.playerVolume}% (systemVolume=$systemVolume)")
                     markServerVolumeSet()
-                    
+
                     // Clear the flag
                     _uiState.value = _uiState.value.copy(playerVolumeFromServer = false)
                 }
-                
+
                 // Handle server-commanded mute changes
                 if (state.playerMutedFromServer) {
                     if (state.playerMuted) {
@@ -202,7 +211,7 @@ class SendspinService : Service() {
                         Log.i(tag, "Applied server mute command: muted=${state.playerMuted}")
                     }
                     markServerVolumeSet()
-                    
+
                     // Clear the flag
                     _uiState.value = _uiState.value.copy(playerMutedFromServer = false)
                 }
@@ -220,11 +229,15 @@ class SendspinService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
         Log.i(tag, "Service started")
         // Detect if this is from a boot receiver (no connection parameters provided)
         val fromBoot = intent?.getStringExtra("fromBoot") == "1"
-        
+
         // Track that this service instance started from boot
         if (fromBoot) {
             startedFromBoot = true
@@ -240,9 +253,9 @@ class SendspinService : Service() {
             val currentTime = System.currentTimeMillis()
             if (lastConnectUrl == wsUrl && (currentTime - lastConnectTime) < 1000) {
                 Log.d(tag, "Ignoring duplicate connection request to $wsUrl")
-                return START_STICKY  // Still return STICKY in case service is killed
+                return START_STICKY // Still return STICKY in case service is killed
             }
-            
+
             lastConnectUrl = wsUrl
             lastConnectTime = currentTime
 
@@ -273,7 +286,7 @@ class SendspinService : Service() {
 
         // Unregister network connectivity receiver
         unregisterNetworkReceiver()
-        
+
         // Unregister volume change receiver
         unregisterVolumeChangeReceiver()
 
@@ -291,16 +304,17 @@ class SendspinService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Sendspin Playback",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Sendspin music playback - keeps service running"
-                setShowBadge(false)
-                enableVibration(false)
-                setSound(null, null)
-            }
+            val channel =
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Sendspin Playback",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Sendspin music playback - keeps service running"
+                    setShowBadge(false)
+                    enableVibration(false)
+                    setSound(null, null)
+                }
 
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
@@ -310,34 +324,37 @@ class SendspinService : Service() {
     private fun createNotification(): Notification {
         val state = _uiState.value
 
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val contentIntent =
+            PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
 
         // Always show track info if available, fallback to status
         val title = if (state.trackTitle.isNullOrBlank()) "Sendspin Player" else state.trackTitle
-        val subtitle = if (state.trackArtist.isNullOrBlank()) {
-            when {
-                state.connected && state.trackTitle != null -> "Now Playing"
-                state.connected -> "Connected"
-                else -> "Not connected"
+        val subtitle =
+            if (state.trackArtist.isNullOrBlank()) {
+                when {
+                    state.connected && state.trackTitle != null -> "Now Playing"
+                    state.connected -> "Connected"
+                    else -> "Not connected"
+                }
+            } else {
+                state.trackArtist
             }
-        } else {
-            state.trackArtist
-        }
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(subtitle)
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(contentIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setShowWhen(false)
+        val builder =
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText(subtitle)
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentIntent(contentIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setShowWhen(false)
 
         // Add album art only on non-low-memory devices
         if (!isLowMemoryDevice) {
@@ -357,7 +374,7 @@ class SendspinService : Service() {
                 builder.addAction(
                     android.R.drawable.ic_media_previous,
                     "Previous",
-                    prevIntent
+                    prevIntent,
                 )
                 actionIndices.add(actionIndices.size)
             }
@@ -368,7 +385,7 @@ class SendspinService : Service() {
                 builder.addAction(
                     android.R.drawable.ic_media_pause,
                     "Pause",
-                    pauseIntent
+                    pauseIntent,
                 )
                 actionIndices.add(actionIndices.size)
             } else if (state.supportedCommands.contains("play")) {
@@ -376,7 +393,7 @@ class SendspinService : Service() {
                 builder.addAction(
                     android.R.drawable.ic_media_play,
                     "Play",
-                    playIntent
+                    playIntent,
                 )
                 actionIndices.add(actionIndices.size)
             }
@@ -387,7 +404,7 @@ class SendspinService : Service() {
                 builder.addAction(
                     android.R.drawable.ic_media_next,
                     "Next",
-                    nextIntent
+                    nextIntent,
                 )
                 actionIndices.add(actionIndices.size)
             }
@@ -397,27 +414,29 @@ class SendspinService : Service() {
     }
 
     private fun createMediaActionIntent(action: String): PendingIntent {
-        val intent = Intent(this, SendspinService::class.java).apply {
-            putExtra("media_action", action)
-        }
+        val intent =
+            Intent(this, SendspinService::class.java).apply {
+                putExtra("media_action", action)
+            }
         return PendingIntent.getService(
             this,
             action.hashCode(),
             intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
 
     private fun updateNotification() {
         val state = _uiState.value
-        val currentState = NotificationState(
-            trackTitle = state.trackTitle,
-            trackArtist = state.trackArtist,
-            playbackState = state.playbackState,
-            hasController = state.hasController,
-            supportedCommands = state.supportedCommands,
-            artworkBitmap = state.artworkBitmap
-        )
+        val currentState =
+            NotificationState(
+                trackTitle = state.trackTitle,
+                trackArtist = state.trackArtist,
+                playbackState = state.playbackState,
+                hasController = state.hasController,
+                supportedCommands = state.supportedCommands,
+                artworkBitmap = state.artworkBitmap,
+            )
 
         // Only update notification if something relevant changed
         if (lastNotificationState != currentState) {
@@ -427,12 +446,18 @@ class SendspinService : Service() {
         }
     }
 
-    fun connect(wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false) {
+    fun connect(
+        wsUrl: String,
+        clientId: String,
+        clientName: String,
+        fromBoot: Boolean = false,
+    ) {
         // Don't create a new connection if we're already connected or connecting to the same server
         if (client != null &&
             _uiState.value.wsUrl == wsUrl &&
             _uiState.value.clientId == clientId &&
-            (_uiState.value.connected || _uiState.value.status.startsWith("connecting"))) {
+            (_uiState.value.connected || _uiState.value.status.startsWith("connecting"))
+        ) {
             Log.i(tag, "Already connected/connecting to this server, ignoring duplicate connect request")
             return
         }
@@ -452,13 +477,14 @@ class SendspinService : Service() {
         // Use startedFromBoot flag to track if service was initially started from boot context
         startForegroundWithRetry(fromBoot = startedFromBoot || fromBoot)
 
-        _uiState.value = _uiState.value.copy(
-            wsUrl = wsUrl,
-            clientId = clientId,
-            clientName = clientName,
-            status = "connecting...",
-            connected = true,
-        )
+        _uiState.value =
+            _uiState.value.copy(
+                wsUrl = wsUrl,
+                clientId = clientId,
+                clientName = clientName,
+                status = "connecting...",
+                connected = true,
+            )
 
         // Load persisted static delay from SharedPreferences (needed when starting from boot
         // since the ViewModel is not running to initialize _uiState with the saved value)
@@ -468,40 +494,41 @@ class SendspinService : Service() {
             _uiState.value = _uiState.value.copy(staticDelayMs = savedStaticDelayMs)
         }
 
-        client = SendspinPcmClient(
-            wsUrl = wsUrl,
-            clientId = clientId,
-            clientName = clientName,
-            context = this,
-            onUiUpdate = { patch ->
-                val previousState = _uiState.value
-                var newState = patch(previousState)
+        client =
+            SendspinPcmClient(
+                wsUrl = wsUrl,
+                clientId = clientId,
+                clientName = clientName,
+                context = this,
+                onUiUpdate = { patch ->
+                    val previousState = _uiState.value
+                    var newState = patch(previousState)
 
-                // Mark that we had at least one successful websocket connection.
-                if (newState.connected && newState.status == "ws_open") {
-                    hasEstablishedConnection = true
-                    dropCountedForCurrentOutage = false
-                }
+                    // Mark that we had at least one successful websocket connection.
+                    if (newState.connected && newState.status == "ws_open") {
+                        hasEstablishedConnection = true
+                        dropCountedForCurrentOutage = false
+                    }
 
-                // Count only unexpected connection losses, and only once per outage.
-                val unexpectedDisconnect =
-                    hasEstablishedConnection &&
-                    previousState.connected &&
-                    !newState.connected &&
-                    (newState.status.startsWith("failure:") || newState.status.startsWith("closed:"))
+                    // Count only unexpected connection losses, and only once per outage.
+                    val unexpectedDisconnect =
+                        hasEstablishedConnection &&
+                            previousState.connected &&
+                            !newState.connected &&
+                            (newState.status.startsWith("failure:") || newState.status.startsWith("closed:"))
 
-                if (unexpectedDisconnect && !dropCountedForCurrentOutage) {
-                    dropCountedForCurrentOutage = true
-                    newState = newState.copy(connectionDrops = previousState.connectionDrops + 1)
-                    Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")
-                }
+                    if (unexpectedDisconnect && !dropCountedForCurrentOutage) {
+                        dropCountedForCurrentOutage = true
+                        newState = newState.copy(connectionDrops = previousState.connectionDrops + 1)
+                        Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")
+                    }
 
-                _uiState.value = newState
-                updateNotification()
+                    _uiState.value = newState
+                    updateNotification()
+                },
+            ).also {
+                it.setStaticDelayMs(_uiState.value.staticDelayMs)
             }
-        ).also {
-            it.setStaticDelayMs(_uiState.value.staticDelayMs)
-        }
 
         // Start health monitoring when connecting
         startHealthMonitoring()
@@ -511,7 +538,10 @@ class SendspinService : Service() {
         }
     }
 
-    private fun startForegroundWithRetry(retryCount: Int = 0, fromBoot: Boolean = false) {
+    private fun startForegroundWithRetry(
+        retryCount: Int = 0,
+        fromBoot: Boolean = false,
+    ) {
         // Android 12+ restricts BOOT_COMPLETED receivers from starting mediaPlayback foreground services
         // The boot receiver now uses startService() instead, so this only handles non-boot contexts
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && fromBoot) {
@@ -547,18 +577,18 @@ class SendspinService : Service() {
         } catch (e: Exception) {
             Log.e(tag, "Error closing client", e)
         }
-        
+
         try {
             client?.cleanupResources()
         } catch (e: Exception) {
             Log.e(tag, "Error cleaning up client resources", e)
         }
-        
+
         client = null
-        
+
         // Stop health monitoring when disconnecting
         stopHealthMonitoring()
-        
+
         // Cancel any pending reconnect attempts
         reconnectJob?.cancel()
         reconnectJob = null
@@ -573,46 +603,52 @@ class SendspinService : Service() {
 
         _uiState.value = _uiState.value.copy(connected = false, status = "disconnected")
         updateNotification()
-        
+
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
-    private fun startAutoReconnect(wsUrl: String, clientId: String, clientName: String) {
+    private fun startAutoReconnect(
+        wsUrl: String,
+        clientId: String,
+        clientName: String,
+    ) {
         // Cancel any existing reconnect job
         reconnectJob?.cancel()
         reconnectRetryCount = 0
-        
-        reconnectJob = scope.launch {
-            while (isActive) {
-                val currentStatus = _uiState.value.status
-                
-                // If port is closed, assume server is being upgraded - use longer wait
-                val delayMs = if (currentStatus.contains("port_closed")) {
-                    // Server likely upgrading - wait 30 seconds between attempts
-                    Log.i(tag, "Port closed (server upgrading?), using extended retry delay")
-                    30_000L
-                } else {
-                    // Normal exponential backoff for other failures
-                    (1000L * Math.pow(2.0, reconnectRetryCount.toDouble())).toLong().coerceAtMost(60000L)
+
+        reconnectJob =
+            scope.launch {
+                while (isActive) {
+                    val currentStatus = _uiState.value.status
+
+                    // If port is closed, assume server is being upgraded - use longer wait
+                    val delayMs =
+                        if (currentStatus.contains("port_closed")) {
+                            // Server likely upgrading - wait 30 seconds between attempts
+                            Log.i(tag, "Port closed (server upgrading?), using extended retry delay")
+                            30_000L
+                        } else {
+                            // Normal exponential backoff for other failures
+                            (1000L * Math.pow(2.0, reconnectRetryCount.toDouble())).toLong().coerceAtMost(60000L)
+                        }
+
+                    reconnectRetryCount++
+                    Log.i(tag, "Reconnect attempt $reconnectRetryCount, waiting ${delayMs}ms")
+
+                    delay(delayMs)
+
+                    // Check if we still want to reconnect (haven't been manually disconnected)
+                    if (_uiState.value.status.startsWith("failure:") || _uiState.value.status.startsWith("closed:")) {
+                        Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
+                        connect(wsUrl, clientId, clientName, fromBoot = false)
+                    } else {
+                        // Connection was restored or user disconnected, stop retrying
+                        break
+                    }
                 }
-                
-                reconnectRetryCount++
-                Log.i(tag, "Reconnect attempt $reconnectRetryCount, waiting ${delayMs}ms")
-                
-                delay(delayMs)
-                
-                // Check if we still want to reconnect (haven't been manually disconnected)
-                if (_uiState.value.status.startsWith("failure:") || _uiState.value.status.startsWith("closed:")) {
-                    Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
-                    connect(wsUrl, clientId, clientName, fromBoot = false)
-                } else {
-                    // Connection was restored or user disconnected, stop retrying
-                    break
-                }
+
+                reconnectJob = null
             }
-            
-            reconnectJob = null
-        }
     }
 
     fun setStaticDelayMs(ms: Long) {
@@ -649,37 +685,42 @@ class SendspinService : Service() {
 
     // Network connectivity monitoring
     private fun registerNetworkReceiver() {
-        connectivityReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                val isCurrentlyConnected = isNetworkAvailable()
-                
-                // Only act on state changes
-                if (isCurrentlyConnected != lastNetworkState) {
-                    lastNetworkState = isCurrentlyConnected
-                    
-                    if (isCurrentlyConnected) {
-                        Log.i(tag, "Network restored, checking connection")
-                        // Only attempt reconnect if we're NOT already connected or connecting
-                        val currentState = _uiState.value
-                        if ((currentState.status.startsWith("failure:") || !currentState.connected) &&
-                            !currentState.wsUrl.isBlank() && 
-                            !currentState.clientId.isBlank() && 
-                            !currentState.clientName.isBlank()) {
-                            Log.i(tag, "Network restored, attempting auto-reconnect")
-                            // Reconnect with existing parameters
-                            scope.launch {
-                                // Give network a moment to stabilize
-                                delay(1000)
-                                connect(currentState.wsUrl, currentState.clientId, currentState.clientName, fromBoot = false)
+        connectivityReceiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(
+                    context: Context?,
+                    intent: Intent?,
+                ) {
+                    val isCurrentlyConnected = isNetworkAvailable()
+
+                    // Only act on state changes
+                    if (isCurrentlyConnected != lastNetworkState) {
+                        lastNetworkState = isCurrentlyConnected
+
+                        if (isCurrentlyConnected) {
+                            Log.i(tag, "Network restored, checking connection")
+                            // Only attempt reconnect if we're NOT already connected or connecting
+                            val currentState = _uiState.value
+                            if ((currentState.status.startsWith("failure:") || !currentState.connected) &&
+                                !currentState.wsUrl.isBlank() &&
+                                !currentState.clientId.isBlank() &&
+                                !currentState.clientName.isBlank()
+                            ) {
+                                Log.i(tag, "Network restored, attempting auto-reconnect")
+                                // Reconnect with existing parameters
+                                scope.launch {
+                                    // Give network a moment to stabilize
+                                    delay(1000)
+                                    connect(currentState.wsUrl, currentState.clientId, currentState.clientName, fromBoot = false)
+                                }
                             }
+                        } else {
+                            Log.i(tag, "Network lost")
+                            updateUiState { it.copy(status = "network_lost", connected = false) }
                         }
-                    } else {
-                        Log.i(tag, "Network lost")
-                        updateUiState { it.copy(status = "network_lost", connected = false) }
                     }
                 }
             }
-        }
 
         try {
             @Suppress("DEPRECATION")
@@ -690,7 +731,7 @@ class SendspinService : Service() {
                 @Suppress("DEPRECATION")
                 registerReceiver(connectivityReceiver, filter)
             }
-            
+
             // Initialize network state
             lastNetworkState = isNetworkAvailable()
             Log.i(tag, "Network receiver registered. Current state: $lastNetworkState")
@@ -714,11 +755,11 @@ class SendspinService : Service() {
     private fun isNetworkAvailable(): Boolean {
         return try {
             val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val network = connectivityManager.activeNetwork ?: return false
                 val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-                
+
                 capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             } else {
                 @Suppress("DEPRECATION")
@@ -737,35 +778,40 @@ class SendspinService : Service() {
     }
 
     private fun registerVolumeChangeReceiver() {
-        volumeChangeReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == "android.media.VOLUME_CHANGED_ACTION") {
-                    val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
-                    if (streamType == android.media.AudioManager.STREAM_MUSIC) {
-                        val nowMs = System.currentTimeMillis()
-                        if (nowMs - lastServerVolumeSetMs < volumeSuppressWindowMs) {
-                            Log.d(tag, "Volume change suppressed (server-initiated)")
-                            return
+        volumeChangeReceiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(
+                    context: Context?,
+                    intent: Intent?,
+                ) {
+                    if (intent?.action == "android.media.VOLUME_CHANGED_ACTION") {
+                        val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
+                        if (streamType == android.media.AudioManager.STREAM_MUSIC) {
+                            val nowMs = System.currentTimeMillis()
+                            if (nowMs - lastServerVolumeSetMs < volumeSuppressWindowMs) {
+                                Log.d(tag, "Volume change suppressed (server-initiated)")
+                                return
+                            }
+                            Log.d(tag, "Volume changed, updating UI state and syncing to server")
+                            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                            val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                            val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                            val volumePercent = (currentVolume * 100 / maxVolume).coerceIn(0, 100)
+
+                            updateUiState { it.copy(playerVolume = volumePercent) }
+
+                            // Sync the volume change back to the server
+                            client?.setPlayerVolume(volumePercent)
                         }
-                        Log.d(tag, "Volume changed, updating UI state and syncing to server")
-                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                        val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-                        val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-                        val volumePercent = (currentVolume * 100 / maxVolume).coerceIn(0, 100)
-                        
-                        updateUiState { it.copy(playerVolume = volumePercent) }
-                        
-                        // Sync the volume change back to the server
-                        client?.setPlayerVolume(volumePercent)
                     }
                 }
             }
-        }
 
         try {
-            val filter = IntentFilter().apply {
-                addAction("android.media.VOLUME_CHANGED_ACTION")
-            }
+            val filter =
+                IntentFilter().apply {
+                    addAction("android.media.VOLUME_CHANGED_ACTION")
+                }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // Android 12+ requires explicit RECEIVER_EXPORTED flag
                 registerReceiver(volumeChangeReceiver, filter, Context.RECEIVER_EXPORTED)
@@ -836,40 +882,41 @@ class SendspinService : Service() {
      * Checks playback loop health every 5 seconds and triggers recovery if hung
      */
     private var healthMonitorJob: Job? = null
-    
+
     private fun startHealthMonitoring() {
         healthMonitorJob?.cancel()
-        healthMonitorJob = scope.launch {
-            while (isActive) {
-                try {
-                    delay(5000)  // Check every 5 seconds
-                    
-                    if (!isServiceHealthy()) {
-                        Log.w(tag, "Service health check failed - triggering recovery")
-                        recoverService()
+        healthMonitorJob =
+            scope.launch {
+                while (isActive) {
+                    try {
+                        delay(5000) // Check every 5 seconds
+
+                        if (!isServiceHealthy()) {
+                            Log.w(tag, "Service health check failed - triggering recovery")
+                            recoverService()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(tag, "Error in health monitor", e)
                     }
-                } catch (e: Exception) {
-                    Log.e(tag, "Error in health monitor", e)
                 }
             }
-        }
     }
-    
+
     private fun isServiceHealthy(): Boolean {
         val client = this.client ?: return false
         return client.isHealthy()
     }
-    
+
     private suspend fun recoverService() {
         try {
             Log.i(tag, "Starting service recovery...")
             client?.close("health_recovery")
             delay(1000)
-            
+
             val wsUrl = _uiState.value.wsUrl
             val clientId = _uiState.value.clientId
             val clientName = _uiState.value.clientName
-            
+
             if (wsUrl.isNotBlank() && clientId.isNotBlank()) {
                 Log.i(tag, "Reconnecting after recovery...")
                 connect(wsUrl, clientId, clientName, fromBoot = false)

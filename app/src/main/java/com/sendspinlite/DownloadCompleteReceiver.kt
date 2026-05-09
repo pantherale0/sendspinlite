@@ -1,9 +1,9 @@
 package com.sendspinlite
 
+import android.app.DownloadManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.app.DownloadManager
 import android.util.Log
 
 /**
@@ -16,15 +16,17 @@ import android.util.Log
  * Mismatched download IDs (from other parts of the app or other apps) are silently ignored.
  */
 class DownloadCompleteReceiver : BroadcastReceiver() {
-
-    override fun onReceive(context: Context, intent: Intent) {
+    override fun onReceive(
+        context: Context,
+        intent: Intent,
+    ) {
         if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
 
         val downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
         if (downloadId == -1L) return
 
         val pendingId = AutoUpdateManager.getPendingDownloadId(context)
-        if (downloadId != pendingId) return   // Not our download – ignore.
+        if (downloadId != pendingId) return // Not our download – ignore.
 
         Log.i("DownloadCompleteReceiver", "Update download $downloadId complete, launching install")
         AutoUpdateManager.clearPendingDownloadId(context)

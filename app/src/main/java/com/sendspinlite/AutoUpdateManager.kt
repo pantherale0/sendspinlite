@@ -27,7 +27,6 @@ import java.net.URL
  * Checks are rate-limited to at most once every [CHECK_INTERVAL_MS] (7 days).
  */
 object AutoUpdateManager {
-
     private const val TAG = "AutoUpdateManager"
     private const val PREFS_NAME = "SendspinPlayerPrefs"
 
@@ -54,29 +53,29 @@ object AutoUpdateManager {
         /** Direct APK download URL, or null if no APK asset is attached to the release. */
         val apkUrl: String?,
         /** HTML URL of the release page for display purposes. */
-        val releaseUrl: String
+        val releaseUrl: String,
     )
 
     // -------------------------------------------------------------------------
     // Preference helpers
     // -------------------------------------------------------------------------
 
-    private fun prefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun prefs(context: Context): SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /** Returns true if the user has opted in to automatic downloading and installing of updates. */
-    fun isAutoUpdateEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_AUTO_UPDATE_ENABLED, false)
+    fun isAutoUpdateEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_AUTO_UPDATE_ENABLED, false)
 
     /** Returns true if the first-launch auto-update prompt has already been shown. */
-    fun hasAskedAboutAutoUpdate(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_AUTO_UPDATE_ASKED, false)
+    fun hasAskedAboutAutoUpdate(context: Context): Boolean = prefs(context).getBoolean(KEY_AUTO_UPDATE_ASKED, false)
 
     /**
      * Persist the user's choice.
      * Also marks the prompt as having been shown so it is not displayed again.
      */
-    fun setAutoUpdateEnabled(context: Context, enabled: Boolean) {
+    fun setAutoUpdateEnabled(
+        context: Context,
+        enabled: Boolean,
+    ) {
         prefs(context).edit()
             .putBoolean(KEY_AUTO_UPDATE_ENABLED, enabled)
             .putBoolean(KEY_AUTO_UPDATE_ASKED, true)
@@ -110,54 +109,56 @@ object AutoUpdateManager {
      * already up to date (or the check fails).  Records the check timestamp on every call
      * regardless of outcome.
      */
-    suspend fun checkForUpdate(context: Context): UpdateInfo? = withContext(Dispatchers.IO) {
-        // Always record the check time so we back off even on network errors.
-        prefs(context).edit()
-            .putLong(KEY_LAST_UPDATE_CHECK, System.currentTimeMillis())
-            .apply()
+    suspend fun checkForUpdate(context: Context): UpdateInfo? =
+        withContext(Dispatchers.IO) {
+            // Always record the check time so we back off even on network errors.
+            prefs(context).edit()
+                .putLong(KEY_LAST_UPDATE_CHECK, System.currentTimeMillis())
+                .apply()
 
-        return@withContext try {
-            val connection = URL(GITHUB_API_URL).openConnection() as HttpURLConnection
-            connection.setRequestProperty("Accept", "application/vnd.github+json")
-            connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 10_000
-            val response = try {
-                connection.inputStream.bufferedReader().use { it.readText() }
-            } finally {
-                connection.disconnect()
-            }
+            return@withContext try {
+                val connection = URL(GITHUB_API_URL).openConnection() as HttpURLConnection
+                connection.setRequestProperty("Accept", "application/vnd.github+json")
+                connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 10_000
+                val response =
+                    try {
+                        connection.inputStream.bufferedReader().use { it.readText() }
+                    } finally {
+                        connection.disconnect()
+                    }
 
-            val json = JSONObject(response)
-            val tagName = json.getString("tag_name")
-            val versionName = tagName.trimStart('v')
-            val releaseUrl = json.getString("html_url")
+                val json = JSONObject(response)
+                val tagName = json.getString("tag_name")
+                val versionName = tagName.trimStart('v')
+                val releaseUrl = json.getString("html_url")
 
-            if (!isNewerVersion(remote = versionName, current = BuildConfig.VERSION_NAME)) {
-                Log.d(TAG, "App is up to date (remote=$versionName, local=${BuildConfig.VERSION_NAME})")
-                return@withContext null
-            }
+                if (!isNewerVersion(remote = versionName, current = BuildConfig.VERSION_NAME)) {
+                    Log.d(TAG, "App is up to date (remote=$versionName, local=${BuildConfig.VERSION_NAME})")
+                    return@withContext null
+                }
 
-            // Find the first APK asset in the release.
-            val assets = json.optJSONArray("assets")
-            var apkUrl: String? = null
-            if (assets != null) {
-                for (i in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(i)
-                    if (asset.getString("name").endsWith(".apk")) {
-                        apkUrl = asset.getString("browser_download_url")
-                        break
+                // Find the first APK asset in the release.
+                val assets = json.optJSONArray("assets")
+                var apkUrl: String? = null
+                if (assets != null) {
+                    for (i in 0 until assets.length()) {
+                        val asset = assets.getJSONObject(i)
+                        if (asset.getString("name").endsWith(".apk")) {
+                            apkUrl = asset.getString("browser_download_url")
+                            break
+                        }
                     }
                 }
-            }
 
-            Log.i(TAG, "Update available: $tagName (apk=${apkUrl != null})")
-            UpdateInfo(tagName, versionName, apkUrl, releaseUrl)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to check for updates: ${e.message}")
-            null
+                Log.i(TAG, "Update available: $tagName (apk=${apkUrl != null})")
+                UpdateInfo(tagName, versionName, apkUrl, releaseUrl)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to check for updates: ${e.message}")
+                null
+            }
         }
-    }
 
     // -------------------------------------------------------------------------
     // Download and install
@@ -168,26 +169,31 @@ object AutoUpdateManager {
      *
      * @return the DownloadManager download ID, or -1 if the download could not be enqueued.
      */
-    fun startDownload(context: Context, updateInfo: UpdateInfo): Long {
-        val apkUrl = updateInfo.apkUrl ?: run {
-            Log.w(TAG, "No APK URL available for ${updateInfo.tagName}")
-            return -1L
-        }
+    fun startDownload(
+        context: Context,
+        updateInfo: UpdateInfo,
+    ): Long {
+        val apkUrl =
+            updateInfo.apkUrl ?: run {
+                Log.w(TAG, "No APK URL available for ${updateInfo.tagName}")
+                return -1L
+            }
         return try {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val request = DownloadManager.Request(Uri.parse(apkUrl)).apply {
-                setTitle("Sendspin Lite Update")
-                setDescription("Downloading update ${updateInfo.tagName}…")
-                setNotificationVisibility(
-                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                )
-                setDestinationInExternalFilesDir(
-                    context,
-                    Environment.DIRECTORY_DOWNLOADS,
-                    "sendspin-lite-${updateInfo.tagName}.apk"
-                )
-                setMimeType("application/vnd.android.package-archive")
-            }
+            val request =
+                DownloadManager.Request(Uri.parse(apkUrl)).apply {
+                    setTitle("Sendspin Lite Update")
+                    setDescription("Downloading update ${updateInfo.tagName}…")
+                    setNotificationVisibility(
+                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
+                    )
+                    setDestinationInExternalFilesDir(
+                        context,
+                        Environment.DIRECTORY_DOWNLOADS,
+                        "sendspin-lite-${updateInfo.tagName}.apk",
+                    )
+                    setMimeType("application/vnd.android.package-archive")
+                }
             val downloadId = dm.enqueue(request)
             // Persist the pending download ID so DownloadCompleteReceiver can match it.
             prefs(context).edit().putLong(KEY_PENDING_DOWNLOAD_ID, downloadId).apply()
@@ -200,8 +206,7 @@ object AutoUpdateManager {
     }
 
     /** Returns the download ID stored by [startDownload], or -1 if none is pending. */
-    fun getPendingDownloadId(context: Context): Long =
-        prefs(context).getLong(KEY_PENDING_DOWNLOAD_ID, -1L)
+    fun getPendingDownloadId(context: Context): Long = prefs(context).getLong(KEY_PENDING_DOWNLOAD_ID, -1L)
 
     /** Clear the stored pending download ID after install has been triggered. */
     fun clearPendingDownloadId(context: Context) {
@@ -216,41 +221,48 @@ object AutoUpdateManager {
      * [android.os.FileUriExposedException], so we convert it to a `content://` URI using
      * [FileProvider] before building the install intent.
      */
-    fun installDownloadedApk(context: Context, downloadId: Long) {
+    fun installDownloadedApk(
+        context: Context,
+        downloadId: Long,
+    ) {
         try {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val query = DownloadManager.Query().setFilterById(downloadId)
-            val localUriString = dm.query(query).use { cursor ->
-                if (!cursor.moveToFirst()) {
-                    Log.w(TAG, "Download ID $downloadId not found in DownloadManager")
-                    return
+            val localUriString =
+                dm.query(query).use { cursor ->
+                    if (!cursor.moveToFirst()) {
+                        Log.w(TAG, "Download ID $downloadId not found in DownloadManager")
+                        return
+                    }
+                    val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                    val status = cursor.getInt(statusCol)
+                    if (status != DownloadManager.STATUS_SUCCESSFUL) {
+                        Log.w(TAG, "Download $downloadId status is $status, not installing")
+                        return
+                    }
+                    val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                    cursor.getString(uriCol)
                 }
-                val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                val status = cursor.getInt(statusCol)
-                if (status != DownloadManager.STATUS_SUCCESSFUL) {
-                    Log.w(TAG, "Download $downloadId status is $status, not installing")
-                    return
-                }
-                val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-                cursor.getString(uriCol)
-            }
 
             // COLUMN_LOCAL_URI is a file:// URI; convert to content:// via FileProvider so
             // the installer activity (in another process) can read the file on API 24+.
-            val filePath = Uri.parse(localUriString).path ?: run {
-                Log.e(TAG, "Could not resolve local file path from URI: $localUriString")
-                return
-            }
+            val filePath =
+                Uri.parse(localUriString).path ?: run {
+                    Log.e(TAG, "Could not resolve local file path from URI: $localUriString")
+                    return
+                }
             val localFile = File(filePath)
-            val apkUri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                localFile
-            )
-            val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(apkUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-            }
+            val apkUri =
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    localFile,
+                )
+            val installIntent =
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                }
             context.startActivity(installIntent)
             Log.i(TAG, "Install intent launched for download $downloadId")
         } catch (e: Exception) {
@@ -270,7 +282,10 @@ object AutoUpdateManager {
      * This is intentional — release APKs are expected to use plain numeric versions
      * like "1.8" or "1.8.1".
      */
-    internal fun isNewerVersion(remote: String, current: String): Boolean {
+    internal fun isNewerVersion(
+        remote: String,
+        current: String,
+    ): Boolean {
         return try {
             val r = remote.split(".").map { it.trim().toIntOrNull() ?: 0 }
             val c = current.split(".").map { it.trim().toIntOrNull() ?: 0 }
