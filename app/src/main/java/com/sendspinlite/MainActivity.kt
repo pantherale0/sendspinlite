@@ -1,7 +1,6 @@
 package com.sendspinlite
 
 import android.Manifest
-import android.content.res.Configuration
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -13,76 +12,71 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import androidx.core.view.WindowCompat
 import androidx.core.content.edit
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.*
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
 class MainActivity : ComponentActivity() {
     private val vm: PlayerViewModel by viewModels()
-    
-    private val nearbyWifiPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        // Permission grant result will be handled by the system
-        // NSD discovery will start or continue based on permission grant
-    }
+
+    private val nearbyWifiPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { isGranted ->
+            // Permission grant result will be handled by the system
+            // NSD discovery will start or continue based on permission grant
+        }
 
     // Needed on Android 9 and below so crash reports can be written to the public Documents folder.
     // On Android 10+ no permission is required (app-specific external storage is used instead).
-    private val writeStoragePermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* result handled implicitly — CrashReportingManager checks at write time */ }
+    private val writeStoragePermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { /* result handled implicitly — CrashReportingManager checks at write time */ }
 
     // Launched after the user opts in to auto-install updates (Android 8+ only).
     // The system shows an "Allow from this source" settings screen; the result is ignored
     // because canRequestPackageInstalls() is checked again at download time.
-    private val installPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { /* result checked via canRequestPackageInstalls() at download time */ }
+    private val installPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult(),
+        ) { /* result checked via canRequestPackageInstalls() at download time */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Ensure system bars remain visible and don't draw behind them
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        
+
         // Check if Opus codec is requested via intent (overrides saved value)
         if (intent.hasExtra("enableOpusCodec")) {
             val enableOpusCodec = intent.getBooleanExtra("enableOpusCodec", false)
             vm.setEnableOpusCodec(enableOpusCodec)
         }
-        
+
         // Check if we need to show battery optimization warning (only on first launch)
         val prefs = getSharedPreferences("SendspinPlayerPrefs", MODE_PRIVATE)
         val shownBatteryWarning = prefs.getBoolean("shown_battery_optimization_warning", false)
-        
+
         // Request NEARBY_WIFI_DEVICES permission for mDNS service discovery
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             nearbyWifiPermissionLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
@@ -101,7 +95,7 @@ class MainActivity : ComponentActivity() {
                     PlayerScreen(
                         vm,
                         showBatteryWarning = !shownBatteryWarning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP,
-                        onRequestInstallPermission = { requestInstallPermission() }
+                        onRequestInstallPermission = { requestInstallPermission() },
                     )
                 }
             }
@@ -111,9 +105,10 @@ class MainActivity : ComponentActivity() {
     /** Direct the user to the "Allow from this source" settings screen (Android 8+). */
     private fun requestInstallPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                data = Uri.parse("package:$packageName")
-            }
+            val intent =
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:$packageName")
+                }
             installPermissionLauncher.launch(intent)
         }
     }
@@ -126,10 +121,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+    override fun onKeyDown(
+        keyCode: Int,
+        event: android.view.KeyEvent?,
+    ): Boolean {
         return when (keyCode) {
             android.view.KeyEvent.KEYCODE_VOLUME_UP,
-            android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> {
+            android.view.KeyEvent.KEYCODE_VOLUME_DOWN,
+            -> {
                 // Update the UI state to reflect the new system volume after a brief delay
                 // to allow the system to process the volume change
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -146,7 +145,7 @@ class MainActivity : ComponentActivity() {
 private fun PlayerScreen(
     vm: PlayerViewModel,
     showBatteryWarning: Boolean = false,
-    onRequestInstallPermission: () -> Unit = {}
+    onRequestInstallPermission: () -> Unit = {},
 ) {
     val ui by vm.ui.collectAsState()
     val discoveredServers by vm.discoveredServers.collectAsState()
@@ -157,11 +156,11 @@ private fun PlayerScreen(
     var showBatteryDialog by remember { mutableStateOf(showBatteryWarning) }
     // Show auto-update prompt on first launch (if user hasn't been asked yet).
     var showAutoUpdateDialog by remember { mutableStateOf(!vm.hasAskedAboutAutoUpdate) }
-    
+
     // State for title tap counter (5 taps to export logs)
     var titleTapCount by remember { mutableStateOf(0) }
     var titleTapLastTime by remember { mutableStateOf(0L) }
-    
+
     val context = LocalContext.current
     var showExportDialog by remember { mutableStateOf(false) }
     var logExportUri by remember { mutableStateOf<Uri?>(null) }
@@ -175,47 +174,49 @@ private fun PlayerScreen(
     var audioIssueSentryEventId by remember { mutableStateOf<String?>(null) }
     var isCollectingAudioReport by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    
+
     // Launcher for saving file
-    val saveFileLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain")
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    val logsFile = File(context.filesDir, "sendspin_logs.txt")
-                    if (logsFile.exists()) {
-                        logsFile.inputStream().use { input ->
-                            input.copyTo(output)
+    val saveFileLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("text/plain"),
+        ) { uri ->
+            if (uri != null) {
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        val logsFile = File(context.filesDir, "sendspin_logs.txt")
+                        if (logsFile.exists()) {
+                            logsFile.inputStream().use { input ->
+                                input.copyTo(output)
+                            }
+                            Log.i("MainActivity", "Logs exported successfully to $uri")
                         }
-                        Log.i("MainActivity", "Logs exported successfully to $uri")
                     }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error exporting logs: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Error exporting logs: ${e.message}")
             }
         }
-    }
 
     // Launcher for saving the audio issue report to a user-chosen location
-    val audioReportSaveLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain")
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    val reportFile = File(context.filesDir, "sendspin_audio_report.txt")
-                    if (reportFile.exists()) {
-                        reportFile.inputStream().use { input -> input.copyTo(output) }
-                        Log.i("MainActivity", "Audio report saved to $uri")
+    val audioReportSaveLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("text/plain"),
+        ) { uri ->
+            if (uri != null) {
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        val reportFile = File(context.filesDir, "sendspin_audio_report.txt")
+                        if (reportFile.exists()) {
+                            reportFile.inputStream().use { input -> input.copyTo(output) }
+                            Log.i("MainActivity", "Audio report saved to $uri")
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error saving audio report: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Error saving audio report: ${e.message}")
             }
         }
-    }
-    
+
     fun handleTitleTap() {
         val currentTime = System.currentTimeMillis()
         // Reset counter if more than 3 seconds have passed
@@ -224,7 +225,7 @@ private fun PlayerScreen(
         }
         titleTapLastTime = currentTime
         titleTapCount++
-        
+
         if (titleTapCount == 5) {
             titleTapCount = 0
             // Trigger log export
@@ -249,9 +250,11 @@ private fun PlayerScreen(
             withContext(Dispatchers.Main) {
                 isCollectingAudioReport = false
                 if (fileUri != null) {
-                    val timestamp = SimpleDateFormat(
-                        "yyyy-MM-dd_HH-mm-ss", Locale.getDefault()
-                    ).format(Date())
+                    val timestamp =
+                        SimpleDateFormat(
+                            "yyyy-MM-dd_HH-mm-ss",
+                            Locale.getDefault(),
+                        ).format(Date())
                     audioReportSaveLauncher.launch("sendspin_audio_report_$timestamp.txt")
                 }
             }
@@ -275,25 +278,26 @@ private fun PlayerScreen(
     fun SyncInfoRow(
         label: String,
         value: String,
-        color: androidx.compose.ui.graphics.Color = MaterialTheme.colors.onSurface
+        color: androidx.compose.ui.graphics.Color = MaterialTheme.colors.onSurface,
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.body2,
-                color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
             )
             Text(
                 text = value,
                 style = MaterialTheme.typography.body2,
                 color = color,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
             )
         }
     }
@@ -302,7 +306,7 @@ private fun PlayerScreen(
     fun getNetworkQualityColor(quality: String): androidx.compose.ui.graphics.Color {
         return when (quality) {
             "GOOD" -> Color.Green
-            "FAIR" -> Color(0xFFFFA500)  // Orange - more visible on white background
+            "FAIR" -> Color(0xFFFFA500) // Orange - more visible on white background
             "POOR" -> MaterialTheme.colors.error
             else -> MaterialTheme.colors.onSurface
         }
@@ -312,7 +316,7 @@ private fun PlayerScreen(
     fun getStabilityColor(stability: String): androidx.compose.ui.graphics.Color {
         return when (stability) {
             "STABLE" -> Color.Green
-            "CONVERGING" -> Color(0xFFFFA500)  // Orange - more visible on white background
+            "CONVERGING" -> Color(0xFFFFA500) // Orange - more visible on white background
             "UNSTABLE" -> MaterialTheme.colors.error
             else -> MaterialTheme.colors.onSurface
         }
@@ -322,7 +326,7 @@ private fun PlayerScreen(
     fun getConnectionTypeColor(connectionType: String): androidx.compose.ui.graphics.Color {
         return when (connectionType) {
             "Ethernet" -> Color.Green
-            "WiFi" -> Color(0xFFFFA500)  // Orange - more visible on white background
+            "WiFi" -> Color(0xFFFFA500) // Orange - more visible on white background
             "Cellular" -> MaterialTheme.colors.error
             else -> MaterialTheme.colors.onSurface
         }
@@ -339,29 +343,31 @@ private fun PlayerScreen(
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(scrollState),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 "Sendspin Lite Player",
                 style = MaterialTheme.typography.h5,
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { handleTitleTap() }
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .clickable { handleTitleTap() },
             )
             IconButton(onClick = { showAudioIssueDialog = true }) {
                 Icon(
                     imageVector = Icons.Filled.BugReport,
                     contentDescription = "Report audio issue",
-                    tint = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                    tint = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                 )
             }
         }
@@ -372,23 +378,23 @@ private fun PlayerScreen(
                 Text(
                     "Available Servers Found:",
                     style = MaterialTheme.typography.body2,
-                    color = MaterialTheme.colors.primary
+                    color = MaterialTheme.colors.primary,
                 )
                 Text(
                     "Connecting to: ${discoveredServers.first().name}",
-                    style = MaterialTheme.typography.caption
+                    style = MaterialTheme.typography.caption,
                 )
             } else if (!ui.discoveryTimeoutExpired) {
                 Text(
                     "Searching for Sendspin servers...",
                     style = MaterialTheme.typography.body2,
-                    color = MaterialTheme.colors.primary
+                    color = MaterialTheme.colors.primary,
                 )
             } else {
                 // Timeout expired, show prompt dialog
                 Button(
                     onClick = { showManualEntryDialog = true },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Cannot find server, enter IP address?")
                 }
@@ -400,14 +406,14 @@ private fun PlayerScreen(
                 OutlinedButton(
                     onClick = {
                         vm.connect(
-                            "ws://${ipAddress}:${port}/sendspin"
+                            "ws://$ipAddress:$port/sendspin",
                         )
                     },
-                    enabled = !ui.connected
+                    enabled = !ui.connected,
                 ) { Text("Connect") }
                 OutlinedButton(
                     onClick = { vm.disconnect() },
-                    enabled = ui.connected
+                    enabled = ui.connected,
                 ) { Text("Disconnect") }
             }
         }
@@ -422,14 +428,14 @@ private fun PlayerScreen(
                 text = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         OutlinedTextField(
                             value = ipAddress,
                             onValueChange = { ipAddress = it },
                             label = { Text("IP Address") },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         )
 
                         OutlinedTextField(
@@ -437,7 +443,7 @@ private fun PlayerScreen(
                             onValueChange = { port = it },
                             label = { Text("Port") },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 },
@@ -445,23 +451,23 @@ private fun PlayerScreen(
                     Button(
                         onClick = {
                             if (ipAddress.isNotBlank() && port.isNotBlank()) {
-                                val url = "ws://${ipAddress}:${port}/sendspin"
+                                val url = "ws://$ipAddress:$port/sendspin"
                                 vm.connect(url)
                                 showManualEntryDialog = false
                             }
                         },
-                        enabled = ipAddress.isNotBlank() && port.isNotBlank()
+                        enabled = ipAddress.isNotBlank() && port.isNotBlank(),
                     ) {
                         Text("Connect")
                     }
                 },
                 dismissButton = {
                     TextButton(
-                        onClick = { showManualEntryDialog = false }
+                        onClick = { showManualEntryDialog = false },
                     ) {
                         Text("Cancel")
                     }
-                }
+                },
             )
         }
 
@@ -474,8 +480,8 @@ private fun PlayerScreen(
                 text = {
                     Text(
                         "To prevent the app from being stopped by battery optimization, " +
-                                "please disable battery optimization for Sendspin Lite in your device settings.\n\n" +
-                                "Tap 'Open Settings' below to go to the battery optimization screen."
+                            "please disable battery optimization for Sendspin Lite in your device settings.\n\n" +
+                            "Tap 'Open Settings' below to go to the battery optimization screen.",
                     )
                 },
                 confirmButton = {
@@ -489,27 +495,27 @@ private fun PlayerScreen(
                             // Update prefs to prevent showing again
                             context.getSharedPreferences(
                                 "SendspinPlayerPrefs",
-                                ComponentActivity.MODE_PRIVATE
+                                ComponentActivity.MODE_PRIVATE,
                             )
                                 .edit {
                                     putBoolean("shown_battery_optimization_warning", true)
                                 }
                             showBatteryDialog = false
-                        }
+                        },
                     ) {
                         Text("Open Settings")
                     }
                 },
                 dismissButton = {
                     TextButton(
-                        onClick = { showBatteryDialog = false }
+                        onClick = { showBatteryDialog = false },
                     ) {
                         Text("Dismiss")
                     }
-                }
+                },
             )
         }
-        
+
         // Export logs dialog
         if (showExportDialog) {
             AlertDialog(
@@ -518,11 +524,11 @@ private fun PlayerScreen(
                 text = { Text("Logs have been exported. You can find them using your device's file manager.") },
                 confirmButton = {
                     Button(
-                        onClick = { showExportDialog = false }
+                        onClick = { showExportDialog = false },
                     ) {
                         Text("OK")
                     }
-                }
+                },
             )
         }
 
@@ -534,13 +540,13 @@ private fun PlayerScreen(
                 text = {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         Text("Please wait while audio diagnostics are collected.")
                     }
                 },
-                confirmButton = {}
+                confirmButton = {},
             )
         }
 
@@ -553,13 +559,13 @@ private fun PlayerScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             "This collects audio diagnostics to help identify the issue. " +
-                            "No personal data, server addresses, or track metadata is included."
+                                "No personal data, server addresses, or track metadata is included.",
                         )
                         if (vm.isCrashReportingAvailable && !crashReportingEnabled) {
                             Text(
                                 "Enable crash & ANR reporting in Settings to also upload reports directly to Sentry.",
                                 style = MaterialTheme.typography.caption,
-                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                             )
                         }
                     }
@@ -579,7 +585,7 @@ private fun PlayerScreen(
                                         showAudioIssueResultDialog = true
                                     }
                                 }
-                            }
+                            },
                         ) {
                             Text("Upload to Sentry")
                         }
@@ -588,7 +594,7 @@ private fun PlayerScreen(
                             onClick = {
                                 showAudioIssueDialog = false
                                 onSaveAudioReport()
-                            }
+                            },
                         ) {
                             Text("Save to File")
                         }
@@ -600,7 +606,7 @@ private fun PlayerScreen(
                             onClick = {
                                 showAudioIssueDialog = false
                                 onSaveAudioReport()
-                            }
+                            },
                         ) {
                             Text("Save to File")
                         }
@@ -609,7 +615,7 @@ private fun PlayerScreen(
                             Text("Cancel")
                         }
                     }
-                }
+                },
             )
         }
 
@@ -625,22 +631,23 @@ private fun PlayerScreen(
                             Text(
                                 "Event ID:",
                                 style = MaterialTheme.typography.caption,
-                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                             )
                             Text(
                                 audioIssueSentryEventId!!,
-                                style = MaterialTheme.typography.body2.copy(
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                )
+                                style =
+                                    MaterialTheme.typography.body2.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    ),
                             )
                             Text(
                                 "Include this event ID in your GitHub issue so the report can be located.",
                                 style = MaterialTheme.typography.caption,
-                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                             )
                         } else {
                             Text(
-                                "The upload failed. Please save the report to a file and attach it to your GitHub issue instead."
+                                "The upload failed. Please save the report to a file and attach it to your GitHub issue instead.",
                             )
                         }
                     }
@@ -656,12 +663,12 @@ private fun PlayerScreen(
                             onClick = {
                                 showAudioIssueResultDialog = false
                                 onSaveAudioReport()
-                            }
+                            },
                         ) {
                             Text("Save to File")
                         }
                     }
-                }
+                },
             )
         }
 
@@ -677,23 +684,23 @@ private fun PlayerScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (crashReportingEnabled) {
                             Text(
-                                "Sendspin Lite crashed during the last session. The crash was automatically reported to help improve the app."
+                                "Sendspin Lite crashed during the last session. The crash was automatically reported to help improve the app.",
                             )
                         } else {
                             Text(
-                                "Sendspin Lite crashed during the last session. Would you like to send an anonymous crash report to help improve the app?"
+                                "Sendspin Lite crashed during the last session. Would you like to send an anonymous crash report to help improve the app?",
                             )
                             if (!vm.isCrashReportingAvailable) {
                                 Text(
                                     "Note: Crash reporting is not available in this build.",
                                     style = MaterialTheme.typography.caption,
-                                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                                 )
                             } else {
                                 Text(
                                     "You can enable automatic crash reporting in the Settings section below.",
                                     style = MaterialTheme.typography.caption,
-                                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                                 )
                             }
                         }
@@ -705,7 +712,7 @@ private fun PlayerScreen(
                             onClick = {
                                 CrashReportingManager.clearPendingCrashReport(context)
                                 showCrashReportDialog = false
-                            }
+                            },
                         ) {
                             Text("OK")
                         }
@@ -720,7 +727,7 @@ private fun PlayerScreen(
                                 }
                                 showCrashReportDialog = false
                             },
-                            enabled = vm.isCrashReportingAvailable
+                            enabled = vm.isCrashReportingAvailable,
                         ) {
                             Text("Send Report")
                         }
@@ -731,11 +738,11 @@ private fun PlayerScreen(
                         onClick = {
                             CrashReportingManager.clearPendingCrashReport(context)
                             showCrashReportDialog = false
-                        }
+                        },
                     ) {
                         Text("Dismiss")
                     }
-                }
+                },
             )
         }
 
@@ -751,14 +758,14 @@ private fun PlayerScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             "Would you like Sendspin Lite to automatically check for updates weekly " +
-                            "and download them in the background?"
+                                "and download them in the background?",
                         )
                         Text(
                             "If you choose \"Enable Auto-Install\", the app will need permission to " +
-                            "install packages on this device. Choosing \"Just Notify Me\" requires no " +
-                            "extra permissions — the app will show a banner when a new version is available.",
+                                "install packages on this device. Choosing \"Just Notify Me\" requires no " +
+                                "extra permissions — the app will show a banner when a new version is available.",
                             style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                         )
                     }
                 },
@@ -773,7 +780,7 @@ private fun PlayerScreen(
                             ) {
                                 onRequestInstallPermission()
                             }
-                        }
+                        },
                     ) {
                         Text("Enable Auto-Install")
                     }
@@ -784,11 +791,11 @@ private fun PlayerScreen(
                             // Notify only – no install permission required.
                             vm.markAutoUpdateAsked()
                             showAutoUpdateDialog = false
-                        }
+                        },
                     ) {
                         Text("Just Notify Me")
                     }
-                }
+                },
             )
         }
 
@@ -797,29 +804,30 @@ private fun PlayerScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = 4.dp,
-                backgroundColor = MaterialTheme.colors.primaryVariant
+                backgroundColor = MaterialTheme.colors.primaryVariant,
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Update Available: ${info.tagName}",
                         style = MaterialTheme.typography.subtitle1,
-                        color = MaterialTheme.colors.onPrimary
+                        color = MaterialTheme.colors.onPrimary,
                     )
                     if (info.apkUrl != null) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = { vm.downloadUpdate(info) },
-                                colors = ButtonDefaults.buttonColors(
-                                    backgroundColor = MaterialTheme.colors.onPrimary,
-                                    contentColor = MaterialTheme.colors.primaryVariant
-                                )
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        backgroundColor = MaterialTheme.colors.onPrimary,
+                                        contentColor = MaterialTheme.colors.primaryVariant,
+                                    ),
                             ) {
                                 Text("Download & Install")
                             }
                             TextButton(onClick = { vm.dismissUpdate() }) {
                                 Text(
                                     "Dismiss",
-                                    color = MaterialTheme.colors.onPrimary
+                                    color = MaterialTheme.colors.onPrimary,
                                 )
                             }
                         }
@@ -830,17 +838,17 @@ private fun PlayerScreen(
                                 onClick = {
                                     val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(info.releaseUrl))
                                     context.startActivity(browserIntent)
-                                }
+                                },
                             ) {
                                 Text(
                                     "View Release",
-                                    color = MaterialTheme.colors.onPrimary
+                                    color = MaterialTheme.colors.onPrimary,
                                 )
                             }
                             TextButton(onClick = { vm.dismissUpdate() }) {
                                 Text(
                                     "Dismiss",
-                                    color = MaterialTheme.colors.onPrimary
+                                    color = MaterialTheme.colors.onPrimary,
                                 )
                             }
                         }
@@ -853,7 +861,7 @@ private fun PlayerScreen(
         Text("Connection Status", style = MaterialTheme.typography.h6)
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = 2.dp
+            elevation = 2.dp,
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 SyncInfoRow("Status", ui.status)
@@ -874,77 +882,85 @@ private fun PlayerScreen(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                elevation = 2.dp
+                elevation = 2.dp,
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     SyncInfoRow("Stream", ui.streamDesc.ifBlank { "-" })
-                    
+
                     // Display sync uncertainty (lower = better sync stability)
-                    val uncertaintyColor = when {
-                        ui.offsetUncertaintyUs < 1_000 -> Color.Green
-                        ui.offsetUncertaintyUs < 5_000 -> Color(0xFFFFA500)  // Orange
-                        else -> MaterialTheme.colors.error
-                    }
-                    val uncertaintyMs = ui.offsetUncertaintyUs / 1000.0
-                    SyncInfoRow("Sync Uncertainty", "±${"%.2f".format(uncertaintyMs)}ms", uncertaintyColor)
-                    
-                    val driftColor = when {
-                        ui.driftPpm >= -5.0 && ui.driftPpm <= 5.0 -> Color.Green
-                        ui.driftPpm >= -25.0 && ui.driftPpm <= 25.0 -> Color(0xFFFFA500)  // Orange
-                        else -> MaterialTheme.colors.error
-                    }
-                    // Format drift: use scientific notation for very small values, regular format otherwise
-                    val driftFormatted = when {
-                        kotlin.math.abs(ui.driftPpm) < 0.01 -> "< 0.01 ppm"
-                        else -> String.format("%.3f ppm", ui.driftPpm)
-                    }
-                    SyncInfoRow("Drift", driftFormatted, driftColor)
-                    
-                    // Color code RTT: green if <10ms, orange 10-50ms, red >50ms
-                    val rttColor = when {
-                        ui.rttUs < 10_000 -> Color.Green
-                        ui.rttUs < 50_000 -> Color(0xFFFFA500)  // Orange
-                        else -> MaterialTheme.colors.error
-                    }
-                    SyncInfoRow("RTT", "~${"%.2f".format(ui.rttUs / 1000.0)}ms", rttColor)
-                    
-                    val bufferColor = when {
-                        ui.queuedChunks >= 190 -> Color.Green
-                        ui.queuedChunks >= 100 -> Color(0xFFFFA500)  // Orange
-                        else -> MaterialTheme.colors.error
-                    }
-                    SyncInfoRow("Buffer", "${ui.queuedChunks} chunks (${ui.bufferAheadMs}ms ahead)", bufferColor)
-                    
-                    // Display smoothed latency
-                    val latencyColor = when {
-                        ui.smoothedLatencyMs < 300.0 -> Color.Green
-                        ui.smoothedLatencyMs < 500.0 -> Color(0xFFFFA500)  // Orange
-                        else -> MaterialTheme.colors.error
-                    }
-                    SyncInfoRow("Audio Latency", "${"%.1f".format(ui.smoothedLatencyMs)}ms", latencyColor)
-                    
-                    // Display playback speed multiplier (only show if not 1.0x)
-                    if (ui.playbackSpeedMultiplier != 1.0f) {
-                        val speedColor = when {
-                            ui.playbackSpeedMultiplier >= 0.999f && ui.playbackSpeedMultiplier <= 1.001f -> Color.Green
-                            ui.playbackSpeedMultiplier >= 0.995f && ui.playbackSpeedMultiplier <= 1.005f -> Color(0xFFFFA500)  // Orange
+                    val uncertaintyColor =
+                        when {
+                            ui.offsetUncertaintyUs < 1_000 -> Color.Green
+                            ui.offsetUncertaintyUs < 5_000 -> Color(0xFFFFA500) // Orange
                             else -> MaterialTheme.colors.error
                         }
+                    val uncertaintyMs = ui.offsetUncertaintyUs / 1000.0
+                    SyncInfoRow("Sync Uncertainty", "±${"%.2f".format(uncertaintyMs)}ms", uncertaintyColor)
+
+                    val driftColor =
+                        when {
+                            ui.driftPpm >= -5.0 && ui.driftPpm <= 5.0 -> Color.Green
+                            ui.driftPpm >= -25.0 && ui.driftPpm <= 25.0 -> Color(0xFFFFA500) // Orange
+                            else -> MaterialTheme.colors.error
+                        }
+                    // Format drift: use scientific notation for very small values, regular format otherwise
+                    val driftFormatted =
+                        when {
+                            kotlin.math.abs(ui.driftPpm) < 0.01 -> "< 0.01 ppm"
+                            else -> String.format("%.3f ppm", ui.driftPpm)
+                        }
+                    SyncInfoRow("Drift", driftFormatted, driftColor)
+
+                    // Color code RTT: green if <10ms, orange 10-50ms, red >50ms
+                    val rttColor =
+                        when {
+                            ui.rttUs < 10_000 -> Color.Green
+                            ui.rttUs < 50_000 -> Color(0xFFFFA500) // Orange
+                            else -> MaterialTheme.colors.error
+                        }
+                    SyncInfoRow("RTT", "~${"%.2f".format(ui.rttUs / 1000.0)}ms", rttColor)
+
+                    val bufferColor =
+                        when {
+                            ui.queuedChunks >= 190 -> Color.Green
+                            ui.queuedChunks >= 100 -> Color(0xFFFFA500) // Orange
+                            else -> MaterialTheme.colors.error
+                        }
+                    SyncInfoRow("Buffer", "${ui.queuedChunks} chunks (${ui.bufferAheadMs}ms ahead)", bufferColor)
+
+                    // Display smoothed latency
+                    val latencyColor =
+                        when {
+                            ui.smoothedLatencyMs < 300.0 -> Color.Green
+                            ui.smoothedLatencyMs < 500.0 -> Color(0xFFFFA500) // Orange
+                            else -> MaterialTheme.colors.error
+                        }
+                    SyncInfoRow("Audio Latency", "${"%.1f".format(ui.smoothedLatencyMs)}ms", latencyColor)
+
+                    // Display playback speed multiplier (only show if not 1.0x)
+                    if (ui.playbackSpeedMultiplier != 1.0f) {
+                        val speedColor =
+                            when {
+                                ui.playbackSpeedMultiplier >= 0.999f && ui.playbackSpeedMultiplier <= 1.001f -> Color.Green
+                                ui.playbackSpeedMultiplier >= 0.995f && ui.playbackSpeedMultiplier <= 1.005f -> Color(0xFFFFA500) // Orange
+                                else -> MaterialTheme.colors.error
+                            }
                         SyncInfoRow("Playback Speed", "${"%.3f".format(ui.playbackSpeedMultiplier)}x", speedColor)
                     }
-                    
+
                     // Static Delay input field (Sendspin spec: static_delay_ms, 0-5000ms)
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = "Static Delay",
                             style = MaterialTheme.typography.body2,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
                         )
                         OutlinedTextField(
                             value = staticDelayInput,
@@ -961,33 +977,35 @@ private fun PlayerScreen(
                             label = { Text("ms") },
                             singleLine = true,
                             modifier = Modifier.width(100.dp),
-                            textStyle = MaterialTheme.typography.body2.copy(
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                            )
+                            textStyle =
+                                MaterialTheme.typography.body2.copy(
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                ),
                         )
                     }
-                    
+
                     if (ui.lateDrops > 0) {
                         SyncInfoRow(
                             "Late Drops",
                             ui.lateDrops.toString(),
-                            color = MaterialTheme.colors.error
+                            color = MaterialTheme.colors.error,
                         )
                     }
-                    
+
                     // Display audible sync and Kalman error stats
                     if (ui.audibleSyncCount > 0) {
                         SyncInfoRow(
                             "Audible Syncs",
                             ui.audibleSyncCount.toString(),
-                            color = Color(0xFFFFA500)  // Orange
+                            // Orange accent for audible sync stat line
+                            color = Color(0xFFFFA500),
                         )
                     }
                     if (ui.kalmanErrorCount > 0) {
                         SyncInfoRow(
                             "Kalman Errors",
                             ui.kalmanErrorCount.toString(),
-                            color = MaterialTheme.colors.error
+                            color = MaterialTheme.colors.error,
                         )
                     }
                 }
@@ -999,35 +1017,38 @@ private fun PlayerScreen(
         Text("Settings", style = MaterialTheme.typography.h6)
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = 2.dp
+            elevation = 2.dp,
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 // Crash & ANR reporting opt-in toggle
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Crash & ANR Reporting",
-                            style = MaterialTheme.typography.body2
+                            style = MaterialTheme.typography.body2,
                         )
                         Text(
-                            text = if (vm.isCrashReportingAvailable)
-                                "Send anonymous crash reports to Sentry to help improve the app"
-                            else
-                                "Not available in this build",
+                            text =
+                                if (vm.isCrashReportingAvailable) {
+                                    "Send anonymous crash reports to Sentry to help improve the app"
+                                } else {
+                                    "Not available in this build"
+                                },
                             style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                         )
                     }
                     Switch(
                         checked = crashReportingEnabled,
                         onCheckedChange = { vm.setCrashReportingEnabled(it) },
-                        enabled = vm.isCrashReportingAvailable
+                        enabled = vm.isCrashReportingAvailable,
                     )
                 }
 
@@ -1035,21 +1056,22 @@ private fun PlayerScreen(
 
                 // Auto-update toggle
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Auto-Install Updates",
-                            style = MaterialTheme.typography.body2
+                            style = MaterialTheme.typography.body2,
                         )
                         Text(
                             text = "Automatically download and install new releases from GitHub",
                             style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                         )
                     }
                     Switch(
@@ -1061,7 +1083,7 @@ private fun PlayerScreen(
                             ) {
                                 onRequestInstallPermission()
                             }
-                        }
+                        },
                     )
                 }
             }
@@ -1069,7 +1091,7 @@ private fun PlayerScreen(
 
         Text(
             "Sendspin Lite v${BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.caption
+            style = MaterialTheme.typography.caption,
         )
     }
 }
@@ -1078,13 +1100,17 @@ private fun PlayerScreen(
  * Export application logs for debugging purposes.
  * Collects logs from LogCat and creates a file in app's cache directory.
  */
-private fun exportAndShareLogs(context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -> Unit) {
+private fun exportAndShareLogs(
+    context: android.content.Context,
+    uiState: PlayerViewModel.UiState,
+    onLogsReady: (Uri?) -> Unit,
+) {
     try {
         // Create logs file in app's files directory
         val logsFile = File(context.filesDir, "sendspin_logs.txt")
-        logsFile.delete()  // Clear previous logs
+        logsFile.delete() // Clear previous logs
         logsFile.createNewFile()
-        
+
         val stringBuilder = StringBuilder()
         stringBuilder.append("=== Sendspin Lite Logs ===\n")
         stringBuilder.append("Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}\n")
@@ -1092,7 +1118,7 @@ private fun exportAndShareLogs(context: android.content.Context, uiState: Player
         stringBuilder.append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
         stringBuilder.append("App Version: ${BuildConfig.VERSION_NAME}\n")
         stringBuilder.append("=========================\n\n")
-        
+
         // Audio Stack Information
         stringBuilder.append("=== AUDIO STACK INFORMATION ===\n")
         stringBuilder.append("Low Memory Device: ${uiState.isLowMemoryDevice}\n")
@@ -1101,7 +1127,7 @@ private fun exportAndShareLogs(context: android.content.Context, uiState: Player
         stringBuilder.append("Static Delay: ${uiState.staticDelayMs}ms\n")
         stringBuilder.append("Enable Opus Codec: ${uiState.enableOpusCodec}\n")
         stringBuilder.append("================================\n\n")
-        
+
         // Current Stats Snapshot
         stringBuilder.append("=== CURRENT STATS SNAPSHOT ===\n")
         stringBuilder.append("Connection Status: ${uiState.status}\n")
@@ -1135,7 +1161,7 @@ private fun exportAndShareLogs(context: android.content.Context, uiState: Player
         stringBuilder.append("  Player Volume: ${uiState.playerVolume}%\n")
         stringBuilder.append("  Player Muted: ${uiState.playerMuted}\n")
         stringBuilder.append("  From Server: ${uiState.playerVolumeFromServer}\n")
-        
+
         if (uiState.hasMetadata) {
             stringBuilder.append("\nMetadata:\n")
             stringBuilder.append("  Title: ${uiState.trackTitle ?: "-"}\n")
@@ -1145,9 +1171,9 @@ private fun exportAndShareLogs(context: android.content.Context, uiState: Player
             stringBuilder.append("  Year: ${uiState.trackYear ?: "-"}\n")
             stringBuilder.append("  Track Number: ${uiState.trackNumber ?: "-"}\n")
         }
-        
+
         stringBuilder.append("================================\n\n")
-        
+
         // Try to collect logs from logcat
         try {
             val process = Runtime.getRuntime().exec("logcat -d")
@@ -1162,17 +1188,18 @@ private fun exportAndShareLogs(context: android.content.Context, uiState: Player
             stringBuilder.append("App logs will be available on next connection.\n")
             Log.w("MainActivity", "Error collecting logcat: ${e.message}")
         }
-        
+
         // Write to file
         logsFile.writeText(stringBuilder.toString())
-        
+
         // Create URI using FileProvider
-        val logsUri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            logsFile
-        )
-        
+        val logsUri =
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                logsFile,
+            )
+
         onLogsReady(logsUri)
     } catch (e: Exception) {
         Log.e("MainActivity", "Error exporting logs: ${e.message}")

@@ -4,17 +4,16 @@ import java.util.PriorityQueue
 import java.util.concurrent.atomic.AtomicLong
 
 class AudioJitterBuffer(private val clockSync: ClockSync) {
-
     data class Snapshot(
         val queuedChunks: Int,
         val bufferAheadMs: Long,
         val lateDrops: Long,
-        val headServerUs: Long?
+        val headServerUs: Long?,
     )
 
     data class Chunk(
         val serverTimestampUs: Long,
-        val pcmData: ByteArray
+        val pcmData: ByteArray,
     )
 
     // Hard cap to prevent unbounded memory growth.
@@ -49,7 +48,10 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
      */
     fun size(): Int = synchronized(q) { q.size }
 
-    fun offer(serverTsUs: Long, pcm: ByteArray) {
+    fun offer(
+        serverTsUs: Long,
+        pcm: ByteArray,
+    ) {
         synchronized(q) {
             // Enforce hard cap: drop oldest chunks if buffer is full
             while (q.size >= maxBufferChunks) {
@@ -71,7 +73,7 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
                 queuedChunks = q.size,
                 bufferAheadMs = aheadMs,
                 lateDrops = lateDropsCounter.get(),
-                headServerUs = head
+                headServerUs = head,
             )
         }
     }
@@ -80,7 +82,10 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
      * Drop items that are very late compared to nowServerUs, leaving the queue head within keepWithinUs (lateness).
      * Returns number of chunks dropped.
      */
-    fun dropWhileLate(nowLocalUs: Long, keepWithinUs: Long): Int {
+    fun dropWhileLate(
+        nowLocalUs: Long,
+        keepWithinUs: Long,
+    ): Int {
         val nowServerUs = clockSync.convertClientToServer(nowLocalUs)
         var dropped = 0
         synchronized(q) {
@@ -103,7 +108,10 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
      * Returns the next playable chunk (based on local time mapping),
      * dropping anything that is too late.
      */
-    fun pollPlayable(nowLocalUs: Long, lateDropUs: Long): Chunk? {
+    fun pollPlayable(
+        nowLocalUs: Long,
+        lateDropUs: Long,
+    ): Chunk? {
         val nowServerUs = clockSync.convertClientToServer(nowLocalUs)
 
         synchronized(q) {

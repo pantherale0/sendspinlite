@@ -7,15 +7,20 @@ import java.net.SocketTimeoutException
 
 object PortChecker {
     private const val TAG = "PortChecker"
-    private const val TIMEOUT_MS = 3000  // 3 second timeout
+    private const val TIMEOUT_MS = 3000 // 3 second timeout
 
     sealed class PortCheckResult {
         data class PortOpen(val host: String, val port: Int) : PortCheckResult()
+
         data class PortClosed(val host: String, val port: Int) : PortCheckResult()
+
         data class ServerUnreachable(val host: String, val port: Int, val error: String) : PortCheckResult()
     }
 
-    suspend fun checkPort(host: String, port: Int): PortCheckResult {
+    suspend fun checkPort(
+        host: String,
+        port: Int,
+    ): PortCheckResult {
         return try {
             val socket = Socket()
             try {

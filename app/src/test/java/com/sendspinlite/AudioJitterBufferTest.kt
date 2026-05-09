@@ -5,7 +5,6 @@ import org.junit.Before
 import org.junit.Test
 
 class AudioJitterBufferTest {
-
     private lateinit var buffer: AudioJitterBuffer
 
     @Before

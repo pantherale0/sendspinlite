@@ -1,0 +1,13 @@
+root = true
+
+[*.{kt,kts}]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+
+# Compose-heavy codebase: wildcard imports and long diagnostics are intentional.
+ktlint_standard_no-wildcard-imports = disabled
+ktlint_standard_max-line-length = disabled
+
+# @Composable functions use PascalCase (Google Compose convention).
+ktlint_function_naming_ignore_when_annotated_with = Composable

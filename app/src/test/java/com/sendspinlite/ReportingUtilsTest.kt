@@ -4,15 +4,15 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class ReportingUtilsTest {
-
     @Test
     fun lastLines_returnsTailLinesWhenInputHasMoreLines() {
-        val input = """
+        val input =
+            """
             one
             two
             three
             four
-        """.trimIndent()
+            """.trimIndent()
 
         val result = lastLines(input, 2)
 
@@ -21,10 +21,11 @@ class ReportingUtilsTest {
 
     @Test
     fun lastLines_returnsEntireTextWhenNExceedsLineCount() {
-        val input = """
+        val input =
+            """
             one
             two
-        """.trimIndent()
+            """.trimIndent()
 
         val result = lastLines(input, 10)
 

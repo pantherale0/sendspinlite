@@ -12,7 +12,7 @@ data class DiscoveredServer(
     val name: String,
     val url: String,
     val host: String,
-    val port: Int
+    val port: Int,
 )
 
 class ServiceDiscovery(private val context: Context) {
@@ -25,7 +25,7 @@ class ServiceDiscovery(private val context: Context) {
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     private var resolveListener: NsdManager.ResolveListener? = null
     private val resolvedServers = mutableMapOf<String, DiscoveredServer>()
-    
+
     // Track if discovery has found and connected to a server
     private var discoveryComplete = false
 
@@ -34,50 +34,57 @@ class ServiceDiscovery(private val context: Context) {
             Log.i(tag, "Discovery already complete, not starting again")
             return
         }
-        
+
         Log.i(tag, "Starting mDNS discovery for _sendspin-server._tcp.")
 
-        discoveryListener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(regType: String) {
-                Log.i(tag, "Discovery started for: $regType")
-            }
+        discoveryListener =
+            object : NsdManager.DiscoveryListener {
+                override fun onDiscoveryStarted(regType: String) {
+                    Log.i(tag, "Discovery started for: $regType")
+                }
 
-            override fun onServiceFound(service: NsdServiceInfo) {
-                Log.i(tag, "Service discovered: ${service.serviceName}")
-                // Resolve the service to get full details
-                // All services found are _sendspin-server._tcp. so we resolve them all
-                @Suppress("DEPRECATION")
-                nsdManager.resolveService(service, getResolveListener())
-            }
+                override fun onServiceFound(service: NsdServiceInfo) {
+                    Log.i(tag, "Service discovered: ${service.serviceName}")
+                    // Resolve the service to get full details
+                    // All services found are _sendspin-server._tcp. so we resolve them all
+                    @Suppress("DEPRECATION")
+                    nsdManager.resolveService(service, getResolveListener())
+                }
 
-            override fun onServiceLost(service: NsdServiceInfo) {
-                Log.i(tag, "Service lost: ${service.serviceName}")
-                // Don't remove if discovery is complete (we're using this server)
-                if (!discoveryComplete) {
-                    resolvedServers.remove(service.serviceName)
-                    _discoveredServers.value = resolvedServers.values.toList()
+                override fun onServiceLost(service: NsdServiceInfo) {
+                    Log.i(tag, "Service lost: ${service.serviceName}")
+                    // Don't remove if discovery is complete (we're using this server)
+                    if (!discoveryComplete) {
+                        resolvedServers.remove(service.serviceName)
+                        _discoveredServers.value = resolvedServers.values.toList()
+                    }
+                }
+
+                override fun onDiscoveryStopped(regType: String) {
+                    Log.i(tag, "Discovery stopped for: $regType")
+                }
+
+                override fun onStartDiscoveryFailed(
+                    regType: String,
+                    errorCode: Int,
+                ) {
+                    Log.e(tag, "Discovery failed to start: $regType, error: $errorCode")
+                    stopDiscovery()
+                }
+
+                override fun onStopDiscoveryFailed(
+                    regType: String,
+                    errorCode: Int,
+                ) {
+                    Log.e(tag, "Discovery failed to stop: $regType, error: $errorCode")
                 }
             }
-
-            override fun onDiscoveryStopped(regType: String) {
-                Log.i(tag, "Discovery stopped for: $regType")
-            }
-
-            override fun onStartDiscoveryFailed(regType: String, errorCode: Int) {
-                Log.e(tag, "Discovery failed to start: $regType, error: $errorCode")
-                stopDiscovery()
-            }
-
-            override fun onStopDiscoveryFailed(regType: String, errorCode: Int) {
-                Log.e(tag, "Discovery failed to stop: $regType, error: $errorCode")
-            }
-        }
 
         try {
             nsdManager.discoverServices(
                 "_sendspin-server._tcp.",
                 NsdManager.PROTOCOL_DNS_SD,
-                discoveryListener
+                discoveryListener,
             )
             Log.i(tag, "Discovery request submitted successfully")
         } catch (e: Exception) {
@@ -87,7 +94,10 @@ class ServiceDiscovery(private val context: Context) {
 
     private fun getResolveListener(): NsdManager.ResolveListener {
         return object : NsdManager.ResolveListener {
-            override fun onResolveFailed(service: NsdServiceInfo, errorCode: Int) {
+            override fun onResolveFailed(
+                service: NsdServiceInfo,
+                errorCode: Int,
+            ) {
                 Log.e(tag, "Failed to resolve service: ${service.serviceName}, error code: $errorCode")
             }
 
@@ -99,13 +109,13 @@ class ServiceDiscovery(private val context: Context) {
                     stopDiscovery()
                     return
                 }
-                
+
                 Log.i(tag, "Service resolved: ${service.serviceName}")
 
                 @Suppress("DEPRECATION")
                 val host = service.host?.hostAddress
                 Log.d(tag, "Resolved host: $host, port: ${service.port}")
-                
+
                 if (host == null) {
                     Log.w(tag, "Service ${service.serviceName} has no host address")
                     return
@@ -116,27 +126,36 @@ class ServiceDiscovery(private val context: Context) {
 
                 // Get path from TXT records, default to /sendspin
                 val pathBytes = properties?.get("path")
-                val path = if (pathBytes != null) {
-                    String(pathBytes, Charsets.UTF_8)
-                } else {
-                    "/sendspin"
-                }
+                val path =
+                    if (pathBytes != null) {
+                        String(pathBytes, Charsets.UTF_8)
+                    } else {
+                        "/sendspin"
+                    }
 
-                val finalPath = if (path.isEmpty()) "/sendspin" else if (path.startsWith("/")) path else "/$path"
+                val finalPath =
+                    if (path.isEmpty()) {
+                        "/sendspin"
+                    } else if (path.startsWith("/")) {
+                        path
+                    } else {
+                        "/$path"
+                    }
                 val url = "ws://$host:$port$finalPath"
 
-                val discoveredServer = DiscoveredServer(
-                    name = service.serviceName.removeSuffix("._sendspin-server._tcp."),
-                    url = url,
-                    host = host,
-                    port = port
-                )
+                val discoveredServer =
+                    DiscoveredServer(
+                        name = service.serviceName.removeSuffix("._sendspin-server._tcp."),
+                        url = url,
+                        host = host,
+                        port = port,
+                    )
 
                 resolvedServers[service.serviceName] = discoveredServer
                 _discoveredServers.value = resolvedServers.values.toList()
 
                 Log.i(tag, "Added server: ${discoveredServer.name} at $url. Total servers: ${_discoveredServers.value.size}")
-                
+
                 // Stop discovery once we have the first server
                 if (!discoveryComplete) {
                     discoveryComplete = true
@@ -159,7 +178,7 @@ class ServiceDiscovery(private val context: Context) {
         discoveryListener = null
         // Don't clear servers - they stay available if we need to reconnect
     }
-    
+
     fun resetDiscovery() {
         Log.i(tag, "Resetting discovery")
         discoveryComplete = false

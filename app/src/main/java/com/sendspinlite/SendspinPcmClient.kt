@@ -17,7 +17,7 @@ class SendspinPcmClient(
     private val clientId: String,
     private val clientName: String,
     private val onUiUpdate: ((PlayerViewModel.UiState) -> PlayerViewModel.UiState) -> Unit,
-    private val context: android.content.Context
+    private val context: android.content.Context,
 ) {
     private val tag = "SendspinPcmClient"
 
@@ -29,9 +29,10 @@ class SendspinPcmClient(
         private const val KEY_AUDIO_WARMUP_BASELINE_TIMESTAMP_MS = "audio_warmup_baseline_timestamp_ms"
 
         // Shared OkHttpClient to avoid leaking thread pools and connection pools on reconnect
-        private val sharedOkHttp = OkHttpClient.Builder()
-            .pingInterval(30, TimeUnit.SECONDS)
-            .build()
+        private val sharedOkHttp =
+            OkHttpClient.Builder()
+                .pingInterval(30, TimeUnit.SECONDS)
+                .build()
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -50,7 +51,7 @@ class SendspinPcmClient(
                 context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? ActivityManager
             val memInfo = ActivityManager.MemoryInfo()
             activityManager?.getMemoryInfo(memInfo)
-            val lowMemory = memInfo?.totalMem ?: 0L < 2_000_000_000L  // Less than 2GB total RAM
+            val lowMemory = memInfo?.totalMem ?: 0L < 2_000_000_000L // Less than 2GB total RAM
             if (lowMemory) {
                 Log.i(tag, "Low-memory device detected: disabling metadata and action buttons")
             }
@@ -98,7 +99,7 @@ class SendspinPcmClient(
             (currentVolume * 100 / maxVolume).coerceIn(0, 100)
         } catch (e: Exception) {
             Log.w(tag, "Failed to get system volume", e)
-            100  // Default to max if we can't read
+            100 // Default to max if we can't read
         }
     }
 
@@ -120,8 +121,10 @@ class SendspinPcmClient(
     // Watchdog/Health check tracking
     @Volatile
     private var lastPlaybackHeartbeatMs: Long = 0L
+
     @Volatile
     private var lastStatsHeartbeatMs: Long = 0L
+
     @Volatile
     private var lastMessageReceivedMs: Long = 0L
 
@@ -139,12 +142,12 @@ class SendspinPcmClient(
     // -50ms balances responsiveness with reliable buffer management across varying network conditions
     // Reduced from -75ms to prevent negative buffer-ahead at startup which causes unnecessary frame drops
     @Volatile
-    private var playoutOffsetUs: Long = -50_000L  // Default -50ms
-    
+    private var playoutOffsetUs: Long = -50_000L // Default -50ms
+
     // Fine-grained adjustment for network/device-specific latency variations
     // Allows per-connection tuning without requiring app restart
     @Volatile
-    private var playoutOffsetAdjustmentUs: Long = 0L  // Neutral by default; avoid systematic early playout
+    private var playoutOffsetAdjustmentUs: Long = 0L // Neutral by default; avoid systematic early playout
 
     // Static delay (µs) per Sendspin spec: compensates for external speaker/amplifier delay.
     // Range: 0-5000ms (0 = audio exits port at the server timestamp).
@@ -154,13 +157,13 @@ class SendspinPcmClient(
     private var staticDelayUs: Long = 0L
 
     // Track codec decode latency to adjust playoutOffsetUs dynamically
-    private var decodeLatencyUs: Long = 0L  // Running average of decode time
+    private var decodeLatencyUs: Long = 0L // Running average of decode time
     private val decodeLatencySamples = ArrayDeque<Long>(30)
-    private val maxDecodeLatencySamples = 30  // Keep rolling average of last 30 frames
+    private val maxDecodeLatencySamples = 30 // Keep rolling average of last 30 frames
 
     // Track last sent error state to prevent spam
     private var lastErrorStateSent: Long = 0L
-    private val errorStateThrottleMs = 1000L  // Only send error state once per second
+    private val errorStateThrottleMs = 1000L // Only send error state once per second
 
     // Track whether a stream has ended to avoid spurious error messages
     @Volatile
@@ -168,23 +171,23 @@ class SendspinPcmClient(
 
     // Track last chunk timestamp to detect discontinuities (skips)
     private var lastChunkServerTimestampUs: Long = Long.MIN_VALUE
-    private val discontinuityThresholdUs = 500_000L  // 500ms = significant skip threshold
+    private val discontinuityThresholdUs = 500_000L // 500ms = significant skip threshold
 
     // Flag to track if we're in "discontinuity recovery mode" (just after skip/seek)
     // In this mode, use chunk count only for startup, ignore time-based buffer calculations
     @Volatile
     private var inDiscontinuityMode: Boolean = false
-    private val discontinuityModeTimeoutMs = 1000L  // Exit mode after 1 second of normal chunks
+    private val discontinuityModeTimeoutMs = 1000L // Exit mode after 1 second of normal chunks
 
     // Throttle UI updates to prevent excessive recomposition on low-memory devices
     private var lastUiUpdateUs: Long = 0L
     private val uiUpdateThrottleMs =
-        if (isLowMemoryDevice) 250L else 100L  // Balanced throttle: 10 updates/sec (normal), 4 updates/sec (low-mem)
+        if (isLowMemoryDevice) 250L else 100L // Balanced throttle: 10 updates/sec (normal), 4 updates/sec (low-mem)
 
     // Statistics counters
-    private var audibleSyncCount: Long = 0  // Incremented when audible sync (catch-up) occurs
-    private var kalmanErrorCount: Long = 0  // Incremented when Kalman filter detects anomalies
-    private var audioScheduleDebugCount = 0  // Debug counter for audio scheduling logs
+    private var audibleSyncCount: Long = 0 // Incremented when audible sync (catch-up) occurs
+    private var kalmanErrorCount: Long = 0 // Incremented when Kalman filter detects anomalies
+    private var audioScheduleDebugCount = 0 // Debug counter for audio scheduling logs
     private var lastRestartCatchupLogMs: Long = 0L
 
     // When Android audioserver dies/restarts, force a short "snap-to-live" phase
@@ -196,10 +199,10 @@ class SendspinPcmClient(
 
     // Audio cut and resync configuration for handling late drops
     // When audio falls too far behind after packet loss, cut and resync instead of relying on slow playback speed
-    private val audioOutOfSyncThresholdMs = 150L  // If behind by >150ms, trigger audio cut
-    private val audioDropDetectionMs = 50L        // If we detect drops and buffer drops below this, prepare for cut
-    private val audioResyncTargetMs = 80L         // Target buffer depth after resync
-    private var lastAudioCutMs: Long = 0L         // Track when we last cut audio to avoid thrashing
+    private val audioOutOfSyncThresholdMs = 150L // If behind by >150ms, trigger audio cut
+    private val audioDropDetectionMs = 50L // If we detect drops and buffer drops below this, prepare for cut
+    private val audioResyncTargetMs = 80L // Target buffer depth after resync
+    private var lastAudioCutMs: Long = 0L // Track when we last cut audio to avoid thrashing
 
     // Startup protection: avoid aggressive cuts immediately after output start,
     // and ramp playout offset in to prevent launching too far behind.
@@ -209,6 +212,7 @@ class SendspinPcmClient(
     private val startupPlayoutOffsetRampUs = 2_000_000L
 
     fun getAudibleSyncCount(): Long = audibleSyncCount
+
     fun getKalmanErrorCount(): Long = kalmanErrorCount
 
     /**
@@ -249,7 +253,7 @@ class SendspinPcmClient(
             it.copy(
                 status = "connecting...",
                 connected = false,
-                groupVolume = actualVolume
+                groupVolume = actualVolume,
             )
         }
 
@@ -257,11 +261,12 @@ class SendspinPcmClient(
         try {
             val url = java.net.URL(wsUrl)
             val host = url.host ?: "localhost"
-            val port = if (url.port == -1) {
-                if (wsUrl.startsWith("wss://")) 443 else 80
-            } else {
-                url.port
-            }
+            val port =
+                if (url.port == -1) {
+                    if (wsUrl.startsWith("wss://")) 443 else 80
+                } else {
+                    url.port
+                }
 
             // Check if port is open before attempting WebSocket connection
             Log.i(tag, "Performing pre-connection port check on $host:$port")
@@ -278,7 +283,7 @@ class SendspinPcmClient(
                     onUiUpdate {
                         it.copy(
                             status = "failure: port_closed (server upgrading?)",
-                            connected = false
+                            connected = false,
                         )
                     }
                     teardown("port_closed")
@@ -290,7 +295,7 @@ class SendspinPcmClient(
                     onUiUpdate {
                         it.copy(
                             status = "failure: server_unreachable",
-                            connected = false
+                            connected = false,
                         )
                     }
                     teardown("server_unreachable")
@@ -301,30 +306,51 @@ class SendspinPcmClient(
             Log.w(tag, "Error during port check, proceeding with connection anyway: ${e.message}")
         }
         output.checkAudioCapabilities(context)
-        ws = sharedOkHttp.newWebSocket(req, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(tag, "WS open")
-                isConnected.set(true)
-                handshakeComplete = false
-                lastMessageReceivedMs = System.currentTimeMillis()
-                onUiUpdate { it.copy(status = "ws_open", connected = true) }
-                sendClientHello()
-            }
+        ws =
+            sharedOkHttp.newWebSocket(
+                req,
+                object : WebSocketListener() {
+                    override fun onOpen(
+                        webSocket: WebSocket,
+                        response: Response,
+                    ) {
+                        Log.i(tag, "WS open")
+                        isConnected.set(true)
+                        handshakeComplete = false
+                        lastMessageReceivedMs = System.currentTimeMillis()
+                        onUiUpdate { it.copy(status = "ws_open", connected = true) }
+                        sendClientHello()
+                    }
 
-            override fun onMessage(webSocket: WebSocket, text: String) = handleText(text)
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) =
-                handleBinary(bytes.toByteArray())
+                    override fun onMessage(
+                        webSocket: WebSocket,
+                        text: String,
+                    ) = handleText(text)
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.w(tag, "WS closed code=$code reason=$reason")
-                teardown("closed: $reason")
-            }
+                    override fun onMessage(
+                        webSocket: WebSocket,
+                        bytes: ByteString,
+                    ) = handleBinary(bytes.toByteArray())
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(tag, "WS failure: ${t.message}", t)
-                teardown("failure: ${t.message}")
-            }
-        })
+                    override fun onClosed(
+                        webSocket: WebSocket,
+                        code: Int,
+                        reason: String,
+                    ) {
+                        Log.w(tag, "WS closed code=$code reason=$reason")
+                        teardown("closed: $reason")
+                    }
+
+                    override fun onFailure(
+                        webSocket: WebSocket,
+                        t: Throwable,
+                        response: Response?,
+                    ) {
+                        Log.e(tag, "WS failure: ${t.message}", t)
+                        teardown("failure: ${t.message}")
+                    }
+                },
+            )
     }
 
     fun close(reason: String) {
@@ -345,10 +371,14 @@ class SendspinPcmClient(
         playoutJob?.cancel()
         playoutJob = null
 
-        timeLoopJob?.cancel(); timeLoopJob = null
-        statsJob?.cancel(); statsJob = null
-        speedAdjustmentJob?.cancel(); speedAdjustmentJob = null
-        watchdogJob?.cancel(); watchdogJob = null
+        timeLoopJob?.cancel()
+        timeLoopJob = null
+        statsJob?.cancel()
+        statsJob = null
+        speedAdjustmentJob?.cancel()
+        speedAdjustmentJob = null
+        watchdogJob?.cancel()
+        watchdogJob = null
 
         // Stop audio output - this prevents buffered data from continuing to play
         output.stop()
@@ -382,7 +412,7 @@ class SendspinPcmClient(
                 trackDuration = null,
                 playbackSpeed = null,
                 repeatMode = null,
-                shuffleEnabled = null
+                shuffleEnabled = null,
             )
         }
     }
@@ -398,7 +428,7 @@ class SendspinPcmClient(
         // This prevents buffered audio from playing after the service is destroyed
         try {
             scope.cancel()
-            Thread.sleep(50)  // Give audio subsystem time to stop and flush
+            Thread.sleep(50) // Give audio subsystem time to stop and flush
         } catch (e: Exception) {
             Log.w(tag, "Error during cleanup/sleep", e)
         }
@@ -432,13 +462,18 @@ class SendspinPcmClient(
         }
     }
 
-    private fun sendJson(type: String, payload: JSONObject) {
+    private fun sendJson(
+        type: String,
+        payload: JSONObject,
+    ) {
         val obj = JSONObject().put("type", type).put("payload", payload)
         val json = obj.toString()
-        if (type != "client/time") Log.i(
-            tag,
-            ">>>> SEND: $type | ${json.take(200)}${if (json.length > 200) "..." else ""}"
-        )
+        if (type != "client/time") {
+            Log.i(
+                tag,
+                ">>>> SEND: $type | ${json.take(200)}${if (json.length > 200) "..." else ""}",
+            )
+        }
         ws?.send(json)
     }
 
@@ -450,11 +485,11 @@ class SendspinPcmClient(
             supportedFormats
                 .put(
                     JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 48000)
-                        .put("bit_depth", 16)
+                        .put("bit_depth", 16),
                 )
                 .put(
                     JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 44100)
-                        .put("bit_depth", 16)
+                        .put("bit_depth", 16),
                 )
         }
 
@@ -464,7 +499,7 @@ class SendspinPcmClient(
                 supportedFormats
                     .put(
                         JSONObject().put("codec", "pcm").put("channels", 2)
-                            .put("sample_rate", sampleRate).put("bit_depth", bitDepth)
+                            .put("sample_rate", sampleRate).put("bit_depth", bitDepth),
                     )
             }
         }
@@ -478,27 +513,30 @@ class SendspinPcmClient(
     }
 
     private fun sendClientHello() {
-        val hello = JSONObject()
-            .put("client_id", clientId)
-            .put("name", clientName)
-            .put("version", 1)
-            .put(
-                "device_info", JSONObject()
-                    .put("product_name", android.os.Build.MODEL)
-                    .put("manufacturer", android.os.Build.MANUFACTURER)
-                    .put(
-                        "software_version",
-                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                    )
-            )
-            .put(
-                "supported_roles", JSONArray()
-                    .put("player@v1")
-            )
+        val hello =
+            JSONObject()
+                .put("client_id", clientId)
+                .put("name", clientName)
+                .put("version", 1)
+                .put(
+                    "device_info",
+                    JSONObject()
+                        .put("product_name", android.os.Build.MODEL)
+                        .put("manufacturer", android.os.Build.MANUFACTURER)
+                        .put(
+                            "software_version",
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName,
+                        ),
+                )
+                .put(
+                    "supported_roles",
+                    JSONArray()
+                        .put("player@v1"),
+                )
 
         val playerSupport = buildPlayerSupportObject()
         hello.put("player@v1_support", playerSupport)
-        hello.put("player_support", playerSupport)  // Legacy field for compatibility
+        hello.put("player_support", playerSupport) // Legacy field for compatibility
 
         sendJson("client/hello", hello)
         onUiUpdate { it.copy(status = "sent client/hello") }
@@ -521,7 +559,11 @@ class SendspinPcmClient(
         onUiUpdate { it.copy(playerMuted = muted, playerMutedFromServer = false) }
     }
 
-    private fun sendClientStatePlayer(volume: Int? = null, muted: Boolean? = null, staticDelayMs: Long? = null) {
+    private fun sendClientStatePlayer(
+        volume: Int? = null,
+        muted: Boolean? = null,
+        staticDelayMs: Long? = null,
+    ) {
         val player = JSONObject()
         volume?.let { player.put("volume", it) }
         muted?.let { player.put("muted", it) }
@@ -533,20 +575,28 @@ class SendspinPcmClient(
         sendJson("client/goodbye", JSONObject().put("reason", reason))
     }
 
-    private fun sendClientStateSynchronized(volume: Int = getActualSystemVolume(), muted: Boolean = false) {
+    private fun sendClientStateSynchronized(
+        volume: Int = getActualSystemVolume(),
+        muted: Boolean = false,
+    ) {
         val currentStaticDelayMs = staticDelayUs / 1000L
-        val player = JSONObject()
-            .put("volume", volume)
-            .put("muted", muted)
-            .put("static_delay_ms", currentStaticDelayMs)
-            .put("supported_commands", JSONArray().put("set_static_delay"))
-        val payload = JSONObject()
-            .put("state", "synchronized")
-            .put("player", player)
+        val player =
+            JSONObject()
+                .put("volume", volume)
+                .put("muted", muted)
+                .put("static_delay_ms", currentStaticDelayMs)
+                .put("supported_commands", JSONArray().put("set_static_delay"))
+        val payload =
+            JSONObject()
+                .put("state", "synchronized")
+                .put("player", player)
         sendJson("client/state", payload)
     }
 
-    private fun sendClientStateError(volume: Int = getActualSystemVolume(), muted: Boolean = false) {
+    private fun sendClientStateError(
+        volume: Int = getActualSystemVolume(),
+        muted: Boolean = false,
+    ) {
         // Don't send error state after stream has ended
         if (streamEnded) {
             return
@@ -560,144 +610,153 @@ class SendspinPcmClient(
         lastErrorStateSent = now
 
         val currentStaticDelayMs = staticDelayUs / 1000L
-        val player = JSONObject()
-            .put("volume", volume)
-            .put("muted", muted)
-            .put("static_delay_ms", currentStaticDelayMs)
-        val payload = JSONObject()
-            .put("state", "error")
-            .put("player", player)
+        val player =
+            JSONObject()
+                .put("volume", volume)
+                .put("muted", muted)
+                .put("static_delay_ms", currentStaticDelayMs)
+        val payload =
+            JSONObject()
+                .put("state", "error")
+                .put("player", player)
         sendJson("client/state", payload)
     }
 
     private fun startTimeSyncLoop() {
         timeLoopJob?.cancel()
-        timeLoopJob = scope.launch {
-            var lastFrequencyLogMs: Long = 0
+        timeLoopJob =
+            scope.launch {
+                var lastFrequencyLogMs: Long = 0
 
-            while (isActive && isConnected.get()) {
-                sendJson("client/time", JSONObject().put("client_transmitted", nowUs()))
+                while (isActive && isConnected.get()) {
+                    sendJson("client/time", JSONObject().put("client_transmitted", nowUs()))
 
-                // ADAPTIVE FREQUENCY based on network conditions and clock stability
-                // For multi-device sync, use more aggressive initial sync frequency
-                val nextIntervalMs = clock.getRecommendedSyncFrequencyMs()
+                    // ADAPTIVE FREQUENCY based on network conditions and clock stability
+                    // For multi-device sync, use more aggressive initial sync frequency
+                    val nextIntervalMs = clock.getRecommendedSyncFrequencyMs()
 
-                // Log frequency changes for diagnostics
-                if (nextIntervalMs != lastFrequencyLogMs) {
-                    val networkQuality = clock.getNetworkConditionQuality()
-                    val clockStability = clock.getClockStability()
-                    Log.i(
-                        tag,
-                        "client/time frequency: ${lastFrequencyLogMs}ms → ${nextIntervalMs}ms " +
+                    // Log frequency changes for diagnostics
+                    if (nextIntervalMs != lastFrequencyLogMs) {
+                        val networkQuality = clock.getNetworkConditionQuality()
+                        val clockStability = clock.getClockStability()
+                        Log.i(
+                            tag,
+                            "client/time frequency: ${lastFrequencyLogMs}ms → ${nextIntervalMs}ms " +
                                 "network=$networkQuality stability=$clockStability " +
-                                "offset=${clock.estimatedOffsetUs() / 1000L}ms drift=${String.format("%.3f", clock.estimatedDriftPpm())}ppm"
-                    )
-                    lastFrequencyLogMs = nextIntervalMs
-                }
+                                "offset=${clock.estimatedOffsetUs() / 1000L}ms drift=${String.format("%.3f", clock.estimatedDriftPpm())}ppm",
+                        )
+                        lastFrequencyLogMs = nextIntervalMs
+                    }
 
-                delay(nextIntervalMs)
+                    delay(nextIntervalMs)
+                }
             }
-        }
     }
 
     private fun startStatsLoop() {
         statsJob?.cancel()
-        statsJob = scope.launch {
-            while (isActive && isConnected.get()) {
-                val snapshot = jitter.snapshot()
+        statsJob =
+            scope.launch {
+                while (isActive && isConnected.get()) {
+                    val snapshot = jitter.snapshot()
 
-                // Signal that stats loop is alive
-                lastStatsHeartbeatMs = System.currentTimeMillis()
+                    // Signal that stats loop is alive
+                    lastStatsHeartbeatMs = System.currentTimeMillis()
 
-                // Update UI with clock sync details - runs every 1 second for responsive updates
-                throttledUiUpdate {
-                    it.copy(
-                        offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
-                        driftPpm = clock.estimatedDriftPpm(),
-                        rttUs = clock.getAverageRttUs(),
-                        networkQuality = clock.getNetworkConditionQuality().toString(),
-                        stability = clock.getClockStability().toString(),
-                        connectionType = getConnectionType(),
-                        playbackSpeedMultiplier = output.getCurrentPlaybackSpeed(),
-                        smoothedLatencyMs = output.getSmoothedLatencyMs()
-                    )
-                }
+                    // Update UI with clock sync details - runs every 1 second for responsive updates
+                    throttledUiUpdate {
+                        it.copy(
+                            offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
+                            driftPpm = clock.estimatedDriftPpm(),
+                            rttUs = clock.getAverageRttUs(),
+                            networkQuality = clock.getNetworkConditionQuality().toString(),
+                            stability = clock.getClockStability().toString(),
+                            connectionType = getConnectionType(),
+                            playbackSpeedMultiplier = output.getCurrentPlaybackSpeed(),
+                            smoothedLatencyMs = output.getSmoothedLatencyMs(),
+                        )
+                    }
 
-                // Detailed logging for multi-device sync diagnostics
-                if (!isLowMemoryDevice && System.currentTimeMillis() % 9000 < 100) {
-                    val offsetMs = clock.estimatedOffsetUs() / 1000.0
-                    val driftPpm = clock.estimatedDriftPpm()
-                    val driftUncertaintyPpm = clock.getDriftUncertaintyPpm()
-                    
-                    Log.i(
-                        tag,
-                        "sync: offset=${String.format("%.2f", offsetMs)}ms " +
+                    // Detailed logging for multi-device sync diagnostics
+                    if (!isLowMemoryDevice && System.currentTimeMillis() % 9000 < 100) {
+                        val offsetMs = clock.estimatedOffsetUs() / 1000.0
+                        val driftPpm = clock.estimatedDriftPpm()
+                        val driftUncertaintyPpm = clock.getDriftUncertaintyPpm()
+
+                        Log.i(
+                            tag,
+                            "sync: offset=${String.format("%.2f", offsetMs)}ms " +
                                 "drift=${String.format("%.3f", driftPpm)}ppm±${String.format("%.3f", driftUncertaintyPpm)} " +
                                 "jitter=${String.format("%.0f", clock.getEstimatedNetworkJitterUs() / 1000.0)}ms " +
                                 "playoutAdj=${playoutOffsetAdjustmentUs / 1000}ms " +
-                                "queued=${snapshot.queuedChunks} ahead=${snapshot.bufferAheadMs}ms codec=$codec"
-                    )
+                                "queued=${snapshot.queuedChunks} ahead=${snapshot.bufferAheadMs}ms codec=$codec",
+                        )
+                    }
+                    delay(1000L) // Run every second for responsive stat updates
                 }
-                delay(1000L)  // Run every second for responsive stat updates
             }
-        }
     }
 
     private fun startPlaybackSpeedAdjustmentLoop() {
         speedAdjustmentJob?.cancel()
-        speedAdjustmentJob = scope.launch {
-            var currentSpeed = 1.0f
-            var emaBufferAheadMs = Double.NaN
-            var lastSuccessfulSpeedUs = 0L
+        speedAdjustmentJob =
+            scope.launch {
+                var currentSpeed = 1.0f
+                var emaBufferAheadMs = Double.NaN
+                var lastSuccessfulSpeedUs = 0L
 
-            while (isActive && isConnected.get()) {
-                if (output.isStarted()) {
-                    val snapshot = jitter.snapshot()
-                    val rawAheadMs = snapshot.bufferAheadMs.toDouble()
+                while (isActive && isConnected.get()) {
+                    if (output.isStarted()) {
+                        val snapshot = jitter.snapshot()
+                        val rawAheadMs = snapshot.bufferAheadMs.toDouble()
 
-                    // EMA smoothing: α=0.3 → ~3-sample window; filters single-tick noise
-                    emaBufferAheadMs = if (emaBufferAheadMs.isNaN()) rawAheadMs
-                                       else 0.3 * rawAheadMs + 0.7 * emaBufferAheadMs
+                        // EMA smoothing: α=0.3 → ~3-sample window; filters single-tick noise
+                        emaBufferAheadMs =
+                            if (emaBufferAheadMs.isNaN()) {
+                                rawAheadMs
+                            } else {
+                                0.3 * rawAheadMs + 0.7 * emaBufferAheadMs
+                            }
 
-                    // Target buffer-ahead = AudioTrack pipeline latency.
-                    val targetAheadMs = output.getEstimatedPipelineLatencyUs() / 1000.0
-                    val bufferErrorMs = emaBufferAheadMs - targetAheadMs
+                        // Target buffer-ahead = AudioTrack pipeline latency.
+                        val targetAheadMs = output.getEstimatedPipelineLatencyUs() / 1000.0
+                        val bufferErrorMs = emaBufferAheadMs - targetAheadMs
 
-                    // Gentle proportional control (Python-like cadence/strength).
-                    // Positive error => too far ahead => slow down (<1.0)
-                    // Negative error => behind => speed up (>1.0)
-                    val kP = 0.00005
-                    var desiredSpeed = (1.0 - (kP * bufferErrorMs)).coerceIn(0.998, 1.002)
+                        // Gentle proportional control (Python-like cadence/strength).
+                        // Positive error => too far ahead => slow down (<1.0)
+                        // Negative error => behind => speed up (>1.0)
+                        val kP = 0.00005
+                        var desiredSpeed = (1.0 - (kP * bufferErrorMs)).coerceIn(0.998, 1.002)
 
-                    // Wider deadband prevents audible hunt around target.
-                    if (kotlin.math.abs(bufferErrorMs) < 12.0) {
-                        desiredSpeed = 1.0
-                    }
-
-                    // Quantize to 0.001x to reduce rapid tiny parameter churn.
-                    desiredSpeed = kotlin.math.round(desiredSpeed * 1000.0) / 1000.0
-
-                    // Rate-limit speed adjustments to once per second to avoid thrashing on low-end devices
-                    val desiredSpeedF = desiredSpeed.toFloat()
-                    if (kotlin.math.abs(desiredSpeedF - currentSpeed) > 0.0001f) {
-                        val nowUs = nowUs()
-                        if (nowUs - lastSuccessfulSpeedUs >= 1_000_000L) {
-                            output.setPlaybackSpeed(desiredSpeedF)
-                            currentSpeed = desiredSpeedF
-                            lastSuccessfulSpeedUs = nowUs
+                        // Wider deadband prevents audible hunt around target.
+                        if (kotlin.math.abs(bufferErrorMs) < 12.0) {
+                            desiredSpeed = 1.0
                         }
+
+                        // Quantize to 0.001x to reduce rapid tiny parameter churn.
+                        desiredSpeed = kotlin.math.round(desiredSpeed * 1000.0) / 1000.0
+
+                        // Rate-limit speed adjustments to once per second to avoid thrashing on low-end devices
+                        val desiredSpeedF = desiredSpeed.toFloat()
+                        if (kotlin.math.abs(desiredSpeedF - currentSpeed) > 0.0001f) {
+                            val nowUs = nowUs()
+                            if (nowUs - lastSuccessfulSpeedUs >= 1_000_000L) {
+                                output.setPlaybackSpeed(desiredSpeedF)
+                                currentSpeed = desiredSpeedF
+                                lastSuccessfulSpeedUs = nowUs
+                            }
+                        }
+                    } else {
+                        // Reset state when output stops so we start fresh on next stream
+                        currentSpeed = 1.0f
+                        emaBufferAheadMs = Double.NaN
+                        lastSuccessfulSpeedUs = 0L
                     }
-                } else {
-                    // Reset state when output stops so we start fresh on next stream
-                    currentSpeed = 1.0f
-                    emaBufferAheadMs = Double.NaN
-                    lastSuccessfulSpeedUs = 0L
+                    // Faster cadence (1s instead of 1.5s) allows quicker response to buffer changes
+                    // while still being gentle enough for low-end devices
+                    delay(1000L)
                 }
-                // Faster cadence (1s instead of 1.5s) allows quicker response to buffer changes
-                // while still being gentle enough for low-end devices
-                delay(1000L)
             }
-        }
     }
 
     private fun startMemoryMonitoringLoop() {
@@ -722,13 +781,13 @@ class SendspinPcmClient(
                     } else if (availableMemMb < 50) {
                         Log.e(
                             tag,
-                            "Critical memory available (${availableMemMb}MB), clearing buffer"
+                            "Critical memory available (${availableMemMb}MB), clearing buffer",
                         )
                         trimAudioBufferCritical()
                     } else if (availableMemMb < 100) {
                         Log.w(
                             tag,
-                            "Low memory available (${availableMemMb}MB), doing moderate trim"
+                            "Low memory available (${availableMemMb}MB), doing moderate trim",
                         )
                         trimAudioBufferModerate()
                     }
@@ -769,12 +828,13 @@ class SendspinPcmClient(
         var selectedFormatText = ""
 
         try {
-            val selected = output.selectHighestNativePcmFormat(
-                context = context,
-                sampleRateCandidates = listOf(48_000, 44_100),
-                channelCandidates = listOf(2, 1),
-                bitDepthCandidates = listOf(32, 24, 16)
-            ) ?: PcmAudioOutput.PcmFormat(48_000, 2, 16)
+            val selected =
+                output.selectHighestNativePcmFormat(
+                    context = context,
+                    sampleRateCandidates = listOf(48_000, 44_100),
+                    channelCandidates = listOf(2, 1),
+                    bitDepthCandidates = listOf(32, 24, 16),
+                ) ?: PcmAudioOutput.PcmFormat(48_000, 2, 16)
 
             selectedFormatText = "${selected.sampleRate}/${selected.channels}/${selected.bitDepth}"
             output.start(selected.sampleRate, selected.channels, selected.bitDepth)
@@ -834,389 +894,400 @@ class SendspinPcmClient(
 
         Log.i(
             tag,
-            "Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}"
+            "Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}",
         )
     }
 
     private fun startPlayoutLoop() {
         playoutJob?.cancel()
-        playoutJob = scope.launch {
-            val minBufferMs = -20L   // allow modestly late starts; catch-up logic will recover
-            val maxStartAheadMs = 150L // Increased from 120ms to allow more buffer accumulation before starting
-            val resyncMinBufferMs = -10L
-            val resyncMaxStartAheadMs = 90L
+        playoutJob =
+            scope.launch {
+                val minBufferMs = -20L // allow modestly late starts; catch-up logic will recover
+                val maxStartAheadMs = 150L // Increased from 120ms to allow more buffer accumulation before starting
+                val resyncMinBufferMs = -10L
+                val resyncMaxStartAheadMs = 90L
 
-            // Normal "too-late" drop once we're running.
-            val lateDropUs = 200_000L
+                // Normal "too-late" drop once we're running.
+                val lateDropUs = 200_000L
 
-            // Make offset changes audible by catching up (dropping) or slowing down (waiting).
-            val dropLateUs = 250_000L
-            val targetLateUs = 100_000L
+                // Make offset changes audible by catching up (dropping) or slowing down (waiting).
+                val dropLateUs = 250_000L
+                val targetLateUs = 100_000L
 
-            // NEW: if output is stopped and the queue head is very late, we must drop until near-now,
-            // otherwise bufferAheadMs stays negative and we never restart (queue grows forever).
-            val restartKeepWithinUs = 20_000L       // bring head within ~20ms late before (re)start
-            val restartDropTriggerAheadMs = -60L    // pre-drop once head is meaningfully late
-            val restartMinAheadMs = -30L            // consider late-start recovery once head is below this
-            val restartMinQueued =
-                4               // allow recovery to begin sooner on constrained devices
-            val forceStartAfterLoops = 80           // ~0.8s with 10ms retry delay
+                // NEW: if output is stopped and the queue head is very late, we must drop until near-now,
+                // otherwise bufferAheadMs stays negative and we never restart (queue grows forever).
+                val restartKeepWithinUs = 20_000L // bring head within ~20ms late before (re)start
+                val restartDropTriggerAheadMs = -60L // pre-drop once head is meaningfully late
+                val restartMinAheadMs = -30L // consider late-start recovery once head is below this
+                val restartMinQueued =
+                    4 // allow recovery to begin sooner on constrained devices
+                val forceStartAfterLoops = 80 // ~0.8s with 10ms retry delay
 
-            var lateRestartLoops = 0
-            var restartBackoffMs = 200L
-            var nextStartAttemptUs = 0L
+                var lateRestartLoops = 0
+                var restartBackoffMs = 200L
+                var nextStartAttemptUs = 0L
 
-            while (isActive && isConnected.get()) {
-                val snapshot = jitter.snapshot()
+                while (isActive && isConnected.get()) {
+                    val snapshot = jitter.snapshot()
 
-                // Signal that playback loop is alive
-                lastPlaybackHeartbeatMs = System.currentTimeMillis()
+                    // Signal that playback loop is alive
+                    lastPlaybackHeartbeatMs = System.currentTimeMillis()
 
-                // Throttle UI updates to prevent excessive recomposition on low-memory devices
-                throttledUiUpdate {
-                    it.copy(
-                        queuedChunks = snapshot.queuedChunks,
-                        bufferAheadMs = snapshot.bufferAheadMs,
-                        lateDrops = snapshot.lateDrops,
-                        offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
-                        driftPpm = clock.estimatedDriftPpm(),
-                        rttUs = clock.getAverageRttUs(),
-                        audibleSyncCount = audibleSyncCount,
-                        kalmanErrorCount = clock.getKalmanErrorCount()
-                    )
-                }
-
-                if (!output.isStarted()) {
-                    val nowLocalUs = nowUs()
-                    if (nextStartAttemptUs > nowLocalUs) {
-                        val waitMs = ((nextStartAttemptUs - nowLocalUs) / 1000L).coerceAtLeast(10L)
-                        delay(waitMs)
-                        continue
+                    // Throttle UI updates to prevent excessive recomposition on low-memory devices
+                    throttledUiUpdate {
+                        it.copy(
+                            queuedChunks = snapshot.queuedChunks,
+                            bufferAheadMs = snapshot.bufferAheadMs,
+                            lateDrops = snapshot.lateDrops,
+                            offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
+                            driftPpm = clock.estimatedDriftPpm(),
+                            rttUs = clock.getAverageRttUs(),
+                            audibleSyncCount = audibleSyncCount,
+                            kalmanErrorCount = clock.getKalmanErrorCount(),
+                        )
                     }
 
-                    if (codec != "pcm" && codec != "opus") {
-                        delay(50)
-                        continue
-                    }
-
-                    // One-time warmup baseline: run on first launch and after app updates.
-                    runAudioWarmupIfNeeded()
-
-                    // NEW: prevent deadlock when head is late (negative ahead) by dropping late chunks now.
-                    if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartDropTriggerAheadMs) {
-                        val dropped = jitter.dropWhileLate(nowUs(), restartKeepWithinUs)
-                        if (dropped > 0) {
-                            val nowMs = System.currentTimeMillis()
-                            if (nowMs - lastRestartCatchupLogMs >= 1000L) {
-                                lastRestartCatchupLogMs = nowMs
-                                Log.w(
-                                    tag,
-                                    "restart-catchup: dropped=$dropped head was late (ahead~${snapshot.bufferAheadMs}ms)"
-                                )
-                            }
-                        }
-                    }
-
-                    val snap2 = jitter.snapshot()
-
-                    if (forceResyncMode) {
-                        // While recovering from audioserver death, drop stale audio more aggressively
-                        // so we rejoin the live timeline quickly.
-                        val dropped = jitter.dropWhileLate(nowUs(), 40_000L)
-                        if (dropped > 0) {
-                            val nowMs = System.currentTimeMillis()
-                            if (nowMs - lastForceResyncLogMs >= 1000L) {
-                                lastForceResyncLogMs = nowMs
-                                Log.w(tag, "force-resync prestart: dropped=$dropped stale chunks")
-                            }
-                        }
-                    }
-
-                    // Calculate effective buffer ahead accounting for playout offset
-                    // Chunks will actually be needed playoutOffsetUs in the future (negative offset = sooner)
-                    val effectiveBufferAheadMs = snap2.bufferAheadMs + (playoutOffsetUs / 1000L)
-
-                    val startMinMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
-                    val startMaxMs = if (forceResyncMode) resyncMaxStartAheadMs else maxStartAheadMs
-
-                    // Start window is based on raw ahead; effective offset is handled in scheduling.
-                    val canStartNormally =
-                        snap2.queuedChunks >= restartMinQueued &&
-                                snap2.bufferAheadMs in startMinMs..startMaxMs
-
-                    // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
-                    // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
-                    if (!canStartNormally && snap2.queuedChunks >= restartMinQueued && snap2.bufferAheadMs < restartMinAheadMs) {
-                        lateRestartLoops++
-                    } else {
-                        lateRestartLoops = 0
-                    }
-
-                    // If we remain late for a while, allow bounded late-start recovery instead of
-                    // endless prestart dropping (which can deadlock playback on constrained devices).
-                    val canStartLateRecovery =
-                        lateRestartLoops >= 20 && snap2.bufferAheadMs >= -50L
-
-                    val forceLateStart =
-                        lateRestartLoops >= forceStartAfterLoops && snap2.bufferAheadMs >= -40L
-                    val canStart = canStartNormally || canStartLateRecovery || forceLateStart
-
-                    if (canStart) {
-                        if ((forceLateStart || canStartLateRecovery) && !canStartNormally) {
-                            Log.w(
-                                tag,
-                                "forcing late-start recovery: ahead=${snap2.bufferAheadMs}ms effectiveAhead=${effectiveBufferAheadMs}ms queued=${snap2.queuedChunks}"
-                            )
-                            // If we're more than 100ms behind on forced late-start, trigger resync to snap to live
-                            // instead of waiting for slow catch-up via playback speed adjustment
-                            if (effectiveBufferAheadMs < -100) {
-                                triggerForceResync("late_start_too_far_behind")
-                                nextStartAttemptUs = nowUs() + 50_000L
-                                continue
-                            }
-                        }
-                        output.start(sampleRate, channels, bitDepth)
-                        if (!output.isStarted()) {
-                            triggerForceResync("start_failed")
-                            outputStartedAtUs = 0L
-                            val backoffNowUs = nowUs()
-                            nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
-                            Log.w(tag, "Audio output failed to start; backing off ${restartBackoffMs}ms")
-                            restartBackoffMs = (restartBackoffMs * 2).coerceAtMost(3000L)
+                    if (!output.isStarted()) {
+                        val nowLocalUs = nowUs()
+                        if (nextStartAttemptUs > nowLocalUs) {
+                            val waitMs = ((nextStartAttemptUs - nowLocalUs) / 1000L).coerceAtLeast(10L)
+                            delay(waitMs)
                             continue
                         }
-                        outputStartedAtUs = nowUs()
 
-                        // Initialize Opus decoder if needed
-                        if (codec == "opus") {
-                            opusDecoder = try {
-                                OpusDecoder(sampleRate, channels)
-                            } catch (e: Exception) {
-                                Log.e(tag, "Failed to create Opus decoder", e)
-                                sendClientStateError()
-                                delay(100)
+                        if (codec != "pcm" && codec != "opus") {
+                            delay(50)
+                            continue
+                        }
+
+                        // One-time warmup baseline: run on first launch and after app updates.
+                        runAudioWarmupIfNeeded()
+
+                        // NEW: prevent deadlock when head is late (negative ahead) by dropping late chunks now.
+                        if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartDropTriggerAheadMs) {
+                            val dropped = jitter.dropWhileLate(nowUs(), restartKeepWithinUs)
+                            if (dropped > 0) {
+                                val nowMs = System.currentTimeMillis()
+                                if (nowMs - lastRestartCatchupLogMs >= 1000L) {
+                                    lastRestartCatchupLogMs = nowMs
+                                    Log.w(
+                                        tag,
+                                        "restart-catchup: dropped=$dropped head was late (ahead~${snapshot.bufferAheadMs}ms)",
+                                    )
+                                }
+                            }
+                        }
+
+                        val snap2 = jitter.snapshot()
+
+                        if (forceResyncMode) {
+                            // While recovering from audioserver death, drop stale audio more aggressively
+                            // so we rejoin the live timeline quickly.
+                            val dropped = jitter.dropWhileLate(nowUs(), 40_000L)
+                            if (dropped > 0) {
+                                val nowMs = System.currentTimeMillis()
+                                if (nowMs - lastForceResyncLogMs >= 1000L) {
+                                    lastForceResyncLogMs = nowMs
+                                    Log.w(tag, "force-resync prestart: dropped=$dropped stale chunks")
+                                }
+                            }
+                        }
+
+                        // Calculate effective buffer ahead accounting for playout offset
+                        // Chunks will actually be needed playoutOffsetUs in the future (negative offset = sooner)
+                        val effectiveBufferAheadMs = snap2.bufferAheadMs + (playoutOffsetUs / 1000L)
+
+                        val startMinMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
+                        val startMaxMs = if (forceResyncMode) resyncMaxStartAheadMs else maxStartAheadMs
+
+                        // Start window is based on raw ahead; effective offset is handled in scheduling.
+                        val canStartNormally =
+                            snap2.queuedChunks >= restartMinQueued &&
+                                snap2.bufferAheadMs in startMinMs..startMaxMs
+
+                        // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
+                        // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
+                        if (!canStartNormally && snap2.queuedChunks >= restartMinQueued && snap2.bufferAheadMs < restartMinAheadMs) {
+                            lateRestartLoops++
+                        } else {
+                            lateRestartLoops = 0
+                        }
+
+                        // If we remain late for a while, allow bounded late-start recovery instead of
+                        // endless prestart dropping (which can deadlock playback on constrained devices).
+                        val canStartLateRecovery =
+                            lateRestartLoops >= 20 && snap2.bufferAheadMs >= -50L
+
+                        val forceLateStart =
+                            lateRestartLoops >= forceStartAfterLoops && snap2.bufferAheadMs >= -40L
+                        val canStart = canStartNormally || canStartLateRecovery || forceLateStart
+
+                        if (canStart) {
+                            if ((forceLateStart || canStartLateRecovery) && !canStartNormally) {
+                                Log.w(
+                                    tag,
+                                    "forcing late-start recovery: ahead=${snap2.bufferAheadMs}ms effectiveAhead=${effectiveBufferAheadMs}ms queued=${snap2.queuedChunks}",
+                                )
+                                // If we're more than 100ms behind on forced late-start, trigger resync to snap to live
+                                // instead of waiting for slow catch-up via playback speed adjustment
+                                if (effectiveBufferAheadMs < -100) {
+                                    triggerForceResync("late_start_too_far_behind")
+                                    nextStartAttemptUs = nowUs() + 50_000L
+                                    continue
+                                }
+                            }
+                            output.start(sampleRate, channels, bitDepth)
+                            if (!output.isStarted()) {
+                                triggerForceResync("start_failed")
+                                outputStartedAtUs = 0L
+                                val backoffNowUs = nowUs()
+                                nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
+                                Log.w(tag, "Audio output failed to start; backing off ${restartBackoffMs}ms")
+                                restartBackoffMs = (restartBackoffMs * 2).coerceAtMost(3000L)
                                 continue
                             }
-                        }
+                            outputStartedAtUs = nowUs()
 
-                        sendClientStateSynchronized()
-                        lateRestartLoops = 0
-                        restartBackoffMs = 200L
-                        nextStartAttemptUs = 0L
-                        Log.i(
-                            tag,
-                            "Audio output started sr=$sampleRate ch=$channels bd=$bitDepth codec=$codec (buffered=${snap2.bufferAheadMs}ms)"
-                        )
-                    } else {
-                        delay(10)
-                        continue
-                    }
-                }
-
-                val chunk = jitter.pollPlayable(nowUs(), lateDropUs)
-                if (chunk == null) {
-                    if (jitter.isEmpty()) {
-                        // Throttle error state messages to prevent spam (already throttled in sendClientStateError)
-                        // Removed aggressive silence flushing here to prevent jitter
-                    }
-                    delay(2)
-                    continue
-                }
-
-                // Decode if Opus, measuring latency
-                val pcmData = if (codec == "opus") {
-                    val decodeStart = nowUs()
-                    val decoded = opusDecoder?.decode(chunk.pcmData) ?: ByteArray(0)
-                    recordDecodeLatency(nowUs() - decodeStart)
-                    decoded
-                } else {
-                    chunk.pcmData
-                }
-
-                if (pcmData.isEmpty()) {
-                    Log.w(tag, "Empty PCM data after decode")
-                    continue
-                }
-
-                val effectiveServerTsUs =
-                    if (playAtServerUs != Long.MIN_VALUE) maxOf(
-                        chunk.serverTimestampUs,
-                        playAtServerUs
-                    )
-                    else chunk.serverTimestampUs
-
-                val nowUsForSchedule = nowUs()
-                val sinceOutputStartUs =
-                    if (outputStartedAtUs > 0L) (nowUsForSchedule - outputStartedAtUs).coerceAtLeast(0L)
-                    else Long.MAX_VALUE
-
-                // Calculate effective playout offset: pipeline delay + measured codec decode latency + device adjustment
-                // Subtract staticDelayUs to schedule audio earlier, compensating for external device delay
-                val startupRampFactor = when {
-                    sinceOutputStartUs == Long.MAX_VALUE -> 1.0
-                    sinceOutputStartUs >= startupPlayoutOffsetRampUs -> 1.0
-                    else -> sinceOutputStartUs.toDouble() / startupPlayoutOffsetRampUs.toDouble()
-                }
-                val rampedBasePlayoutOffsetUs = (playoutOffsetUs.toDouble() * startupRampFactor).toLong()
-                val totalPlayoutOffsetUs = rampedBasePlayoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
-
-                // Convert server timestamp to client time using Kalman filter offset (same client "now" as earlyUs)
-                val localPlayUs =
-                    clock.convertServerToClient(effectiveServerTsUs, nowUsForSchedule) + totalPlayoutOffsetUs
-                val now = nowUsForSchedule
-                val earlyUs = localPlayUs - now
-
-                // Server-time lateness: how many ms the chunk is past its server timestamp.
-                // Positive = late; negative = ahead of server time.
-                //
-                // Derivation:
-                //   earlyUs = localPlayUs - now
-                //           = (clock.convertServerToClient(serverTs) + totalPlayoutOffsetUs) - now
-                //   → earlyUs - totalPlayoutOffsetUs = clock.convertServerToClient(serverTs) - now
-                //   → -(earlyUs - totalPlayoutOffsetUs) = now - clock.convertServerToClient(serverTs)
-                //                                       ≈ now_server - serverTs   (offset ≈ 0)
-                //
-                // This is independent of staticDelayUs and playoutOffsetUs, so threshold
-                // checks based on it work correctly even when the server has applied a large
-                // static delay (e.g. 754 ms on Echo Show 8) that would otherwise make earlyUs
-                // permanently very negative and trigger false audio-cut / catch-up events.
-                val serverLatenessMs = -(earlyUs - totalPlayoutOffsetUs) / 1000L
-
-                if (forceResyncMode) {
-                    // If still late during forced resync, drop to near-live instead of gradually drifting.
-                    // Compare against server-time lateness so that devices with large staticDelayMs
-                    // or pipeline offset don't spuriously discard all buffered audio.
-                    if (serverLatenessMs > 80L) {
-                        val dropped = jitter.dropWhileLate(nowUs(), 30_000L)
-                        if (dropped > 0) {
-                            val nowMs = System.currentTimeMillis()
-                            if (nowMs - lastForceResyncLogMs >= 1000L) {
-                                lastForceResyncLogMs = nowMs
-                                Log.w(tag, "force-resync runtime: dropped=$dropped serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")
+                            // Initialize Opus decoder if needed
+                            if (codec == "opus") {
+                                opusDecoder =
+                                    try {
+                                        OpusDecoder(sampleRate, channels)
+                                    } catch (e: Exception) {
+                                        Log.e(tag, "Failed to create Opus decoder", e)
+                                        sendClientStateError()
+                                        delay(100)
+                                        continue
+                                    }
                             }
+
+                            sendClientStateSynchronized()
+                            lateRestartLoops = 0
+                            restartBackoffMs = 200L
+                            nextStartAttemptUs = 0L
+                            Log.i(
+                                tag,
+                                "Audio output started sr=$sampleRate ch=$channels bd=$bitDepth codec=$codec (buffered=${snap2.bufferAheadMs}ms)",
+                            )
+                        } else {
+                            delay(10)
+                            continue
                         }
+                    }
+
+                    val chunk = jitter.pollPlayable(nowUs(), lateDropUs)
+                    if (chunk == null) {
+                        if (jitter.isEmpty()) {
+                            // Throttle error state messages to prevent spam (already throttled in sendClientStateError)
+                            // Removed aggressive silence flushing here to prevent jitter
+                        }
+                        delay(2)
                         continue
                     }
 
-                    // Exit resync mode once the chunk is near (or ahead of) server time, or timeout expires.
-                    if (serverLatenessMs < 40L || nowUs() >= forceResyncUntilUs) {
-                        forceResyncMode = false
-                        forceResyncUntilUs = 0L
-                        Log.i(tag, "force-resync complete: serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")
-                    }
-                }
-
-                // Aggressive audio cut when audio falls too far behind server time.
-                // Uses server-time lateness instead of earlyMs so that a large staticDelayMs
-                // (e.g. 754 ms set by the server for Echo Show 8) does not cause continuous
-                // false-positive cuts that produce the buffer-drain / drop cycle.
-                val nowMs = System.currentTimeMillis()
-                val timeSinceLastCutMs = nowMs - lastAudioCutMs
-                val startupCutGraceActive = sinceOutputStartUs < startupCutGraceUs
-                val effectiveOutOfSyncThresholdMs =
-                    if (startupCutGraceActive) (audioOutOfSyncThresholdMs + 120L) else audioOutOfSyncThresholdMs
-
-                if (!forceResyncMode && serverLatenessMs > effectiveOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
-                    val snapBeforeCut = jitter.snapshot()
-                    val lateDropsCount = snapBeforeCut.lateDrops
-                    Log.w(
-                        tag,
-                        "audio-cut triggered: too far behind (serverLate=${serverLatenessMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing."
-                    )
-                    output.stop()
-                    outputStartedAtUs = 0L
-                    triggerForceResync("audio_out_of_sync_late_drop")
-                    lastAudioCutMs = nowMs
-                    val backoffNowUs = nowUs()
-                    nextStartAttemptUs = backoffNowUs + 500_000L  // Delay 500ms before restart attempt
-                    continue
-                }
-                
-                // Debug: log first few scheduling attempts
-                if (audioScheduleDebugCount < 3) {
-                    audioScheduleDebugCount++
-                    Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs/1000}ms serverLate=${serverLatenessMs}ms playout=${totalPlayoutOffsetUs/1000}ms")
-                }
-
-                // If we're behind by a lot in server time, drop chunks to catch up (audible effect).
-                // Use server-time lateness so a large staticDelayMs does not trigger spurious catch-up.
-                val dropLateThresholdMs = dropLateUs / 1000L
-                if (serverLatenessMs > dropLateThresholdMs) {
-                    var dropped = 1
-                    val maxDrops = 50  // Prevent unbounded dropping that causes ANR
-                    val catchupStart = nowUs()
-                    val targetLateThresholdMs = targetLateUs / 1000L
-                    while (dropped < maxDrops) {
-                        val next = jitter.pollPlayable(nowUs(), Long.MAX_VALUE) ?: break
-                        val nextPcm = if (codec == "opus") {
+                    // Decode if Opus, measuring latency
+                    val pcmData =
+                        if (codec == "opus") {
                             val decodeStart = nowUs()
-                            val decoded = opusDecoder?.decode(next.pcmData) ?: ByteArray(0)
+                            val decoded = opusDecoder?.decode(chunk.pcmData) ?: ByteArray(0)
                             recordDecodeLatency(nowUs() - decodeStart)
                             decoded
                         } else {
-                            next.pcmData
+                            chunk.pcmData
                         }
 
-                        // Apply same decode latency compensation during catch-up as during normal playback
-                        val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
-                        val scheduleNowUs = nowUs()
-                        val nextLocalPlayUs =
-                            clock.convertServerToClient(next.serverTimestampUs, scheduleNowUs) +
-                                nextTotalPlayoutOffsetUs
-                        val nextEarlyUs = nextLocalPlayUs - scheduleNowUs
-                        // Server-time lateness for the candidate chunk
-                        val nextServerLatenessMs = -(nextEarlyUs - nextTotalPlayoutOffsetUs) / 1000L
-                        dropped++
-                        if (nextServerLatenessMs <= targetLateThresholdMs) {
-                            if (nextPcm.isNotEmpty()) {
-                                val ok = output.writePcm(nextPcm)
-                                if (!ok) {
-                                    Log.w(tag, "catch-up write failed; restarting output")
-                                    output.stop()
-                                    triggerForceResync("catchup_write_failed")
-                                    val backoffNowUs = nowUs()
-                                    nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
-                                    restartBackoffMs = (restartBackoffMs * 2).coerceAtMost(3000L)
-                                    break
+                    if (pcmData.isEmpty()) {
+                        Log.w(tag, "Empty PCM data after decode")
+                        continue
+                    }
+
+                    val effectiveServerTsUs =
+                        if (playAtServerUs != Long.MIN_VALUE) {
+                            maxOf(
+                                chunk.serverTimestampUs,
+                                playAtServerUs,
+                            )
+                        } else {
+                            chunk.serverTimestampUs
+                        }
+
+                    val nowUsForSchedule = nowUs()
+                    val sinceOutputStartUs =
+                        if (outputStartedAtUs > 0L) {
+                            (nowUsForSchedule - outputStartedAtUs).coerceAtLeast(0L)
+                        } else {
+                            Long.MAX_VALUE
+                        }
+
+                    // Calculate effective playout offset: pipeline delay + measured codec decode latency + device adjustment
+                    // Subtract staticDelayUs to schedule audio earlier, compensating for external device delay
+                    val startupRampFactor =
+                        when {
+                            sinceOutputStartUs == Long.MAX_VALUE -> 1.0
+                            sinceOutputStartUs >= startupPlayoutOffsetRampUs -> 1.0
+                            else -> sinceOutputStartUs.toDouble() / startupPlayoutOffsetRampUs.toDouble()
+                        }
+                    val rampedBasePlayoutOffsetUs = (playoutOffsetUs.toDouble() * startupRampFactor).toLong()
+                    val totalPlayoutOffsetUs = rampedBasePlayoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
+
+                    // Convert server timestamp to client time using Kalman filter offset (same client "now" as earlyUs)
+                    val localPlayUs =
+                        clock.convertServerToClient(effectiveServerTsUs, nowUsForSchedule) + totalPlayoutOffsetUs
+                    val now = nowUsForSchedule
+                    val earlyUs = localPlayUs - now
+
+                    // Server-time lateness: how many ms the chunk is past its server timestamp.
+                    // Positive = late; negative = ahead of server time.
+                    //
+                    // Derivation:
+                    //   earlyUs = localPlayUs - now
+                    //           = (clock.convertServerToClient(serverTs) + totalPlayoutOffsetUs) - now
+                    //   → earlyUs - totalPlayoutOffsetUs = clock.convertServerToClient(serverTs) - now
+                    //   → -(earlyUs - totalPlayoutOffsetUs) = now - clock.convertServerToClient(serverTs)
+                    //                                       ≈ now_server - serverTs   (offset ≈ 0)
+                    //
+                    // This is independent of staticDelayUs and playoutOffsetUs, so threshold
+                    // checks based on it work correctly even when the server has applied a large
+                    // static delay (e.g. 754 ms on Echo Show 8) that would otherwise make earlyUs
+                    // permanently very negative and trigger false audio-cut / catch-up events.
+                    val serverLatenessMs = -(earlyUs - totalPlayoutOffsetUs) / 1000L
+
+                    if (forceResyncMode) {
+                        // If still late during forced resync, drop to near-live instead of gradually drifting.
+                        // Compare against server-time lateness so that devices with large staticDelayMs
+                        // or pipeline offset don't spuriously discard all buffered audio.
+                        if (serverLatenessMs > 80L) {
+                            val dropped = jitter.dropWhileLate(nowUs(), 30_000L)
+                            if (dropped > 0) {
+                                val nowMs = System.currentTimeMillis()
+                                if (nowMs - lastForceResyncLogMs >= 1000L) {
+                                    lastForceResyncLogMs = nowMs
+                                    Log.w(tag, "force-resync runtime: dropped=$dropped serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")
                                 }
                             }
-                            break
+                            continue
                         }
-                        // Yield frequently (every 2 drops) to prevent ANR and allow other threads
-                        if (dropped % 2 == 0) {
-                            yield()
+
+                        // Exit resync mode once the chunk is near (or ahead of) server time, or timeout expires.
+                        if (serverLatenessMs < 40L || nowUs() >= forceResyncUntilUs) {
+                            forceResyncMode = false
+                            forceResyncUntilUs = 0L
+                            Log.i(tag, "force-resync complete: serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")
                         }
                     }
-                    if (dropped > 1) {
-                        audibleSyncCount++
+
+                    // Aggressive audio cut when audio falls too far behind server time.
+                    // Uses server-time lateness instead of earlyMs so that a large staticDelayMs
+                    // (e.g. 754 ms set by the server for Echo Show 8) does not cause continuous
+                    // false-positive cuts that produce the buffer-drain / drop cycle.
+                    val nowMs = System.currentTimeMillis()
+                    val timeSinceLastCutMs = nowMs - lastAudioCutMs
+                    val startupCutGraceActive = sinceOutputStartUs < startupCutGraceUs
+                    val effectiveOutOfSyncThresholdMs =
+                        if (startupCutGraceActive) (audioOutOfSyncThresholdMs + 120L) else audioOutOfSyncThresholdMs
+
+                    if (!forceResyncMode && serverLatenessMs > effectiveOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
+                        val snapBeforeCut = jitter.snapshot()
+                        val lateDropsCount = snapBeforeCut.lateDrops
                         Log.w(
                             tag,
-                            "catch-up: dropped=$dropped (${(nowUs() - catchupStart) / 1000}ms) playoutOffset=${playoutOffsetUs / 1000}ms adjustment=${playoutOffsetAdjustmentUs / 1000}ms (audibleSyncCount=$audibleSyncCount)"
+                            "audio-cut triggered: too far behind (serverLate=${serverLatenessMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing.",
                         )
+                        output.stop()
+                        outputStartedAtUs = 0L
+                        triggerForceResync("audio_out_of_sync_late_drop")
+                        lastAudioCutMs = nowMs
+                        val backoffNowUs = nowUs()
+                        nextStartAttemptUs = backoffNowUs + 500_000L // Delay 500ms before restart attempt
+                        continue
                     }
-                    continue
-                }
 
-                // Sleep until we're exactly one pipeline-latency before the intended play time.
-                // This ensures data reaches the speaker at the correct moment regardless of buffer depth.
-                val pipelineLatencyUs = output.getEstimatedPipelineLatencyUs()
-                if (earlyUs > pipelineLatencyUs) {
-                    delay((earlyUs - pipelineLatencyUs) / 1000)
-                }
+                    // Debug: log first few scheduling attempts
+                    if (audioScheduleDebugCount < 3) {
+                        audioScheduleDebugCount++
+                        Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs / 1000}ms serverLate=${serverLatenessMs}ms playout=${totalPlayoutOffsetUs / 1000}ms")
+                    }
 
-                val ok = output.writePcm(pcmData)
-                if (!ok) {
-                    Log.w(tag, "PCM write failed; restarting output")
-                    output.stop()
-                    outputStartedAtUs = 0L
-                    triggerForceResync("pcm_write_failed")
-                    val backoffNowUs = nowUs()
-                    nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
-                    restartBackoffMs = (restartBackoffMs * 2).coerceAtMost(3000L)
-                    continue
+                    // If we're behind by a lot in server time, drop chunks to catch up (audible effect).
+                    // Use server-time lateness so a large staticDelayMs does not trigger spurious catch-up.
+                    val dropLateThresholdMs = dropLateUs / 1000L
+                    if (serverLatenessMs > dropLateThresholdMs) {
+                        var dropped = 1
+                        val maxDrops = 50 // Prevent unbounded dropping that causes ANR
+                        val catchupStart = nowUs()
+                        val targetLateThresholdMs = targetLateUs / 1000L
+                        while (dropped < maxDrops) {
+                            val next = jitter.pollPlayable(nowUs(), Long.MAX_VALUE) ?: break
+                            val nextPcm =
+                                if (codec == "opus") {
+                                    val decodeStart = nowUs()
+                                    val decoded = opusDecoder?.decode(next.pcmData) ?: ByteArray(0)
+                                    recordDecodeLatency(nowUs() - decodeStart)
+                                    decoded
+                                } else {
+                                    next.pcmData
+                                }
+
+                            // Apply same decode latency compensation during catch-up as during normal playback
+                            val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
+                            val scheduleNowUs = nowUs()
+                            val nextLocalPlayUs =
+                                clock.convertServerToClient(next.serverTimestampUs, scheduleNowUs) +
+                                    nextTotalPlayoutOffsetUs
+                            val nextEarlyUs = nextLocalPlayUs - scheduleNowUs
+                            // Server-time lateness for the candidate chunk
+                            val nextServerLatenessMs = -(nextEarlyUs - nextTotalPlayoutOffsetUs) / 1000L
+                            dropped++
+                            if (nextServerLatenessMs <= targetLateThresholdMs) {
+                                if (nextPcm.isNotEmpty()) {
+                                    val ok = output.writePcm(nextPcm)
+                                    if (!ok) {
+                                        Log.w(tag, "catch-up write failed; restarting output")
+                                        output.stop()
+                                        triggerForceResync("catchup_write_failed")
+                                        val backoffNowUs = nowUs()
+                                        nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
+                                        restartBackoffMs = (restartBackoffMs * 2).coerceAtMost(3000L)
+                                        break
+                                    }
+                                }
+                                break
+                            }
+                            // Yield frequently (every 2 drops) to prevent ANR and allow other threads
+                            if (dropped % 2 == 0) {
+                                yield()
+                            }
+                        }
+                        if (dropped > 1) {
+                            audibleSyncCount++
+                            Log.w(
+                                tag,
+                                "catch-up: dropped=$dropped (${(nowUs() - catchupStart) / 1000}ms) playoutOffset=${playoutOffsetUs / 1000}ms adjustment=${playoutOffsetAdjustmentUs / 1000}ms (audibleSyncCount=$audibleSyncCount)",
+                            )
+                        }
+                        continue
+                    }
+
+                    // Sleep until we're exactly one pipeline-latency before the intended play time.
+                    // This ensures data reaches the speaker at the correct moment regardless of buffer depth.
+                    val pipelineLatencyUs = output.getEstimatedPipelineLatencyUs()
+                    if (earlyUs > pipelineLatencyUs) {
+                        delay((earlyUs - pipelineLatencyUs) / 1000)
+                    }
+
+                    val ok = output.writePcm(pcmData)
+                    if (!ok) {
+                        Log.w(tag, "PCM write failed; restarting output")
+                        output.stop()
+                        outputStartedAtUs = 0L
+                        triggerForceResync("pcm_write_failed")
+                        val backoffNowUs = nowUs()
+                        nextStartAttemptUs = backoffNowUs + (restartBackoffMs * 1000L)
+                        restartBackoffMs = (restartBackoffMs * 2).coerceAtMost(3000L)
+                        continue
+                    }
                 }
             }
-        }
     }
 
     private fun handleText(text: String) {
@@ -1226,23 +1297,26 @@ class SendspinPcmClient(
             val type = obj.optString("type", "")
             val payload = obj.optJSONObject("payload") ?: JSONObject()
 
-            if (type != "server/time") Log.i(
-                tag,
-                "<<<< RECV: $type | ${text.take(200)}${if (text.length > 200) "..." else ""}"
-            )
+            if (type != "server/time") {
+                Log.i(
+                    tag,
+                    "<<<< RECV: $type | ${text.take(200)}${if (text.length > 200) "..." else ""}",
+                )
+            }
 
             when (type) {
                 "server/hello" -> {
                     handshakeComplete = true
-                    val activeRoles = payload.optJSONArray("active_roles")?.let { arr ->
-                        (0 until arr.length()).joinToString(",") { arr.getString(it) }
-                    } ?: ""
+                    val activeRoles =
+                        payload.optJSONArray("active_roles")?.let { arr ->
+                            (0 until arr.length()).joinToString(",") { arr.getString(it) }
+                        } ?: ""
 
                     val hasController = activeRoles.contains("controller")
                     val hasMetadata = activeRoles.contains("metadata")
                     Log.i(
                         tag,
-                        "Active roles: $activeRoles, hasController: $hasController, hasMetadata: $hasMetadata"
+                        "Active roles: $activeRoles, hasController: $hasController, hasMetadata: $hasMetadata",
                     )
 
                     onUiUpdate {
@@ -1250,7 +1324,7 @@ class SendspinPcmClient(
                             status = "server/hello",
                             activeRoles = activeRoles,
                             hasController = hasController,
-                            hasMetadata = hasMetadata
+                            hasMetadata = hasMetadata,
                         )
                     }
                     startTimeSyncLoop()
@@ -1258,7 +1332,7 @@ class SendspinPcmClient(
                     startStatsLoop()
                     startPlaybackSpeedAdjustmentLoop()
                     startMemoryMonitoringLoop()
-                    startWatchdogLoop()  // Monitor playback loop health
+                    startWatchdogLoop() // Monitor playback loop health
 
                     // Send initial state with actual Android volume
                     val volumePercent = getActualSystemVolume()
@@ -1282,16 +1356,16 @@ class SendspinPcmClient(
                 }
 
                 "stream/start" -> {
-                    streamEnded = false  // Reset flag when new stream starts
-                    lastChunkServerTimestampUs = Long.MIN_VALUE  // Reset discontinuity detector
+                    streamEnded = false // Reset flag when new stream starts
+                    lastChunkServerTimestampUs = Long.MIN_VALUE // Reset discontinuity detector
                     inDiscontinuityMode = false
                     decodeLatencyUs = 0L
                     decodeLatencySamples.clear()
                     audioScheduleDebugCount = 0
-                    playoutOffsetUs = -50_000L  // Reset to default on new stream
-                    playoutOffsetAdjustmentUs = 0L  // Clear any accumulated adjustment too
+                    playoutOffsetUs = -50_000L // Reset to default on new stream
+                    playoutOffsetAdjustmentUs = 0L // Clear any accumulated adjustment too
                     outputStartedAtUs = 0L
-                    
+
                     val player = payload.optJSONObject("player")
                     if (player != null) {
                         codec = player.optString("codec", codec)
@@ -1299,21 +1373,25 @@ class SendspinPcmClient(
                         channels = player.optInt("channels", channels)
                         bitDepth = player.optInt("bit_depth", bitDepth)
                         playAtServerUs =
-                            if (player.has("play_at")) player.optLong(
-                                "play_at",
+                            if (player.has("play_at")) {
+                                player.optLong(
+                                    "play_at",
+                                    Long.MIN_VALUE,
+                                )
+                            } else {
                                 Long.MIN_VALUE
-                            ) else Long.MIN_VALUE
+                            }
 
                         onUiUpdate {
                             it.copy(
                                 status = "stream/start",
-                                streamDesc = "$codec ${sampleRate / 1000}kHz ${channels}ch ${bitDepth}bit"
+                                streamDesc = "$codec ${sampleRate / 1000}kHz ${channels}ch ${bitDepth}bit",
                             )
                         }
 
                         // Use pause() to clear buffer for new stream, preserving track for resume/reuse
                         output.pause()
-                        
+
                         jitter.clear()
                         opusDecoder = null
                     }
@@ -1355,7 +1433,7 @@ class SendspinPcmClient(
                             it.copy(
                                 groupVolume = volume,
                                 groupMuted = muted,
-                                supportedCommands = supportedCommands
+                                supportedCommands = supportedCommands,
                             )
                         }
                     }
@@ -1372,86 +1450,136 @@ class SendspinPcmClient(
                             }
 
                             if (metadata.has("title")) {
-                                newState = newState.copy(
-                                    trackTitle = if (metadata.isNull("title")) null else metadata.getString(
-                                        "title"
+                                newState =
+                                    newState.copy(
+                                        trackTitle =
+                                            if (metadata.isNull("title")) {
+                                                null
+                                            } else {
+                                                metadata.getString(
+                                                    "title",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             if (metadata.has("artist")) {
-                                newState = newState.copy(
-                                    trackArtist = if (metadata.isNull("artist")) null else metadata.getString(
-                                        "artist"
+                                newState =
+                                    newState.copy(
+                                        trackArtist =
+                                            if (metadata.isNull("artist")) {
+                                                null
+                                            } else {
+                                                metadata.getString(
+                                                    "artist",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             if (metadata.has("album")) {
-                                newState = newState.copy(
-                                    albumTitle = if (metadata.isNull("album")) null else metadata.getString(
-                                        "album"
+                                newState =
+                                    newState.copy(
+                                        albumTitle =
+                                            if (metadata.isNull("album")) {
+                                                null
+                                            } else {
+                                                metadata.getString(
+                                                    "album",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             if (metadata.has("album_artist")) {
-                                newState = newState.copy(
-                                    albumArtist = if (metadata.isNull("album_artist")) null else metadata.getString(
-                                        "album_artist"
+                                newState =
+                                    newState.copy(
+                                        albumArtist =
+                                            if (metadata.isNull("album_artist")) {
+                                                null
+                                            } else {
+                                                metadata.getString(
+                                                    "album_artist",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             if (metadata.has("year")) {
-                                newState = newState.copy(
-                                    trackYear = if (metadata.isNull("year")) null else metadata.getInt(
-                                        "year"
+                                newState =
+                                    newState.copy(
+                                        trackYear =
+                                            if (metadata.isNull("year")) {
+                                                null
+                                            } else {
+                                                metadata.getInt(
+                                                    "year",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             if (metadata.has("track")) {
-                                newState = newState.copy(
-                                    trackNumber = if (metadata.isNull("track")) null else metadata.getInt(
-                                        "track"
+                                newState =
+                                    newState.copy(
+                                        trackNumber =
+                                            if (metadata.isNull("track")) {
+                                                null
+                                            } else {
+                                                metadata.getInt(
+                                                    "track",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             // Parse progress object
                             if (metadata.has("progress")) {
                                 val progress = metadata.optJSONObject("progress")
                                 if (progress != null) {
-                                    newState = newState.copy(
-                                        trackProgress = progress.getLong("track_progress"),
-                                        trackDuration = progress.getLong("track_duration"),
-                                        playbackSpeed = progress.getInt("playback_speed")
-                                    )
+                                    newState =
+                                        newState.copy(
+                                            trackProgress = progress.getLong("track_progress"),
+                                            trackDuration = progress.getLong("track_duration"),
+                                            playbackSpeed = progress.getInt("playback_speed"),
+                                        )
                                 } else {
                                     // progress is null - clear it
-                                    newState = newState.copy(
-                                        trackProgress = null,
-                                        trackDuration = null,
-                                        playbackSpeed = null
-                                    )
+                                    newState =
+                                        newState.copy(
+                                            trackProgress = null,
+                                            trackDuration = null,
+                                            playbackSpeed = null,
+                                        )
                                 }
                             }
 
                             if (metadata.has("repeat")) {
-                                newState = newState.copy(
-                                    repeatMode = if (metadata.isNull("repeat")) null else metadata.getString(
-                                        "repeat"
+                                newState =
+                                    newState.copy(
+                                        repeatMode =
+                                            if (metadata.isNull("repeat")) {
+                                                null
+                                            } else {
+                                                metadata.getString(
+                                                    "repeat",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             if (metadata.has("shuffle")) {
-                                newState = newState.copy(
-                                    shuffleEnabled = if (metadata.isNull("shuffle")) null else metadata.getBoolean(
-                                        "shuffle"
+                                newState =
+                                    newState.copy(
+                                        shuffleEnabled =
+                                            if (metadata.isNull("shuffle")) {
+                                                null
+                                            } else {
+                                                metadata.getBoolean(
+                                                    "shuffle",
+                                                )
+                                            },
                                     )
-                                )
                             }
 
                             newState
@@ -1473,7 +1601,7 @@ class SendspinPcmClient(
                                 onUiUpdate {
                                     it.copy(
                                         playerVolume = volume,
-                                        playerVolumeFromServer = true
+                                        playerVolumeFromServer = true,
                                     )
                                 }
                                 // Echo back in state
@@ -1487,7 +1615,7 @@ class SendspinPcmClient(
                                 onUiUpdate {
                                     it.copy(
                                         playerMuted = muted,
-                                        playerMutedFromServer = true
+                                        playerMutedFromServer = true,
                                     )
                                 }
                                 // Echo back in state
@@ -1495,15 +1623,16 @@ class SendspinPcmClient(
                             }
 
                             "set_static_delay" -> {
-                                val newDelayMs = player.optLong("static_delay_ms", 0L)
-                                    .coerceIn(0L, 5000L)
+                                val newDelayMs =
+                                    player.optLong("static_delay_ms", 0L)
+                                        .coerceIn(0L, 5000L)
                                 Log.i(tag, "server/command set_static_delay: ${newDelayMs}ms (server commanded)")
                                 staticDelayUs = newDelayMs * 1000L
                                 // Notify service to persist the new delay
                                 onUiUpdate {
                                     it.copy(
                                         staticDelayMs = newDelayMs,
-                                        staticDelayMsFromServer = true
+                                        staticDelayMsFromServer = true,
                                     )
                                 }
                                 // Echo back in state
@@ -1540,7 +1669,7 @@ class SendspinPcmClient(
                     if (kotlin.math.abs(timestampJumpUs) > discontinuityThresholdUs) {
                         Log.w(
                             tag,
-                            "Stream discontinuity detected: jump=${timestampJumpUs / 1000}ms, clearing buffer and entering discontinuity recovery mode"
+                            "Stream discontinuity detected: jump=${timestampJumpUs / 1000}ms, clearing buffer and entering discontinuity recovery mode",
                         )
                         jitter.clear()
                         inDiscontinuityMode = true
@@ -1553,7 +1682,10 @@ class SendspinPcmClient(
         }
     }
 
-    private fun readInt64BE(buf: ByteArray, off: Int): Long {
+    private fun readInt64BE(
+        buf: ByteArray,
+        off: Int,
+    ): Long {
         var v = 0L
         for (i in 0 until 8) v = (v shl 8) or (buf[off + i].toLong() and 0xFFL)
         return v
@@ -1583,16 +1715,16 @@ class SendspinPcmClient(
         val targetSize = (currentSize / 3).coerceAtMost(200).coerceAtLeast(150)
         Log.e(
             tag,
-            "CRITICAL memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 150 for LAN stability)"
+            "CRITICAL memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 150 for LAN stability)",
         )
         jitter.trimTo(targetSize)
-        opusDecoder = null  // Still free decoder
+        opusDecoder = null // Still free decoder
         // Update UI to reflect buffer state
         val snapshot = jitter.snapshot()
         onUiUpdate {
             it.copy(
                 queuedChunks = snapshot.queuedChunks,
-                bufferAheadMs = snapshot.bufferAheadMs
+                bufferAheadMs = snapshot.bufferAheadMs,
             )
         }
     }
@@ -1607,7 +1739,7 @@ class SendspinPcmClient(
         onUiUpdate {
             it.copy(
                 queuedChunks = snapshot.queuedChunks,
-                bufferAheadMs = snapshot.bufferAheadMs
+                bufferAheadMs = snapshot.bufferAheadMs,
             )
         }
     }
@@ -1619,14 +1751,14 @@ class SendspinPcmClient(
         val targetSize = (currentSize / 2).coerceAtMost(300).coerceAtLeast(200)
         Log.w(
             tag,
-            "LOW memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 200 for stable playback)"
+            "LOW memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 200 for stable playback)",
         )
         jitter.trimTo(targetSize)
         val snapshot = jitter.snapshot()
         onUiUpdate {
             it.copy(
                 queuedChunks = snapshot.queuedChunks,
-                bufferAheadMs = snapshot.bufferAheadMs
+                bufferAheadMs = snapshot.bufferAheadMs,
             )
         }
     }
@@ -1637,29 +1769,31 @@ class SendspinPcmClient(
      */
     private fun startWatchdogLoop() {
         watchdogJob?.cancel()
-        watchdogJob = scope.launch {
-            while (isActive && isConnected.get()) {
-                delay(5000)  // Check every 5 seconds
+        watchdogJob =
+            scope.launch {
+                while (isActive && isConnected.get()) {
+                    delay(5000) // Check every 5 seconds
 
-                val now = System.currentTimeMillis()
-                val playbackTimeout = 10_000L  // 10 seconds of no heartbeat = hung
-                val statsTimeout = 10_000L
+                    val now = System.currentTimeMillis()
+                    val playbackTimeout = 10_000L // 10 seconds of no heartbeat = hung
+                    val statsTimeout = 10_000L
 
-                val playbackDead = (now - lastPlaybackHeartbeatMs) > playbackTimeout
-                val statsDead = (now - lastStatsHeartbeatMs) > statsTimeout
+                    val playbackDead = (now - lastPlaybackHeartbeatMs) > playbackTimeout
+                    val statsDead = (now - lastStatsHeartbeatMs) > statsTimeout
 
-                if (playbackDead || statsDead) {
-                    val msg = buildString {
-                        append("Watchdog: ")
-                        if (playbackDead) append("playback hung ")
-                        if (statsDead) append("stats hung")
+                    if (playbackDead || statsDead) {
+                        val msg =
+                            buildString {
+                                append("Watchdog: ")
+                                if (playbackDead) append("playback hung ")
+                                if (statsDead) append("stats hung")
+                            }
+                        Log.e(tag, msg)
+                        // Signal the caller to trigger recovery
+                        sendClientStateError()
                     }
-                    Log.e(tag, msg)
-                    // Signal the caller to trigger recovery
-                    sendClientStateError()
                 }
             }
-        }
     }
 
     /**
@@ -1674,11 +1808,11 @@ class SendspinPcmClient(
         if (!handshakeComplete) return false
 
         val now = System.currentTimeMillis()
-        val heartbeatTimeout = 10_000L  // 10 seconds of no internal heartbeat = hung loop
+        val heartbeatTimeout = 10_000L // 10 seconds of no internal heartbeat = hung loop
         // Once the handshake is complete the time-sync loop sends client/time every ≤2 s and
         // the server echoes server/time back. Three minutes of silence is a reliable signal
         // that the connection is dead even though OkHttp has not (yet) reported a failure.
-        val messageTimeout = 3 * 60 * 1000L  // 3 minutes
+        val messageTimeout = 3 * 60 * 1000L // 3 minutes
 
         val playbackOk = (now - lastPlaybackHeartbeatMs) <= heartbeatTimeout
         val statsOk = (now - lastStatsHeartbeatMs) <= heartbeatTimeout

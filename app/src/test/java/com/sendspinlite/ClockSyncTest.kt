@@ -4,7 +4,6 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class ClockSyncTest {
-
     @Test
     fun hasConverged_becomesTrueAfterSufficientUpdates() {
         val clockSync = ClockSync.referenceFilter()
@@ -18,7 +17,7 @@ class ClockSyncTest {
                 clientTransmittedUs = clientTx,
                 clientReceivedUs = clientRx,
                 serverReceivedUs = serverRx,
-                serverTransmittedUs = serverTx
+                serverTransmittedUs = serverTx,
             )
         }
 

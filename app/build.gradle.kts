@@ -36,14 +36,15 @@ android {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
-            val hasSigningEnv = listOf(
-                "KEYSTORE_FILE",
-                "KEYSTORE_PASSWORD",
-                "KEY_ALIAS",
-                "KEY_PASSWORD"
-            ).all { !System.getenv(it).isNullOrBlank() }
+            val hasSigningEnv =
+                listOf(
+                    "KEYSTORE_FILE",
+                    "KEYSTORE_PASSWORD",
+                    "KEY_ALIAS",
+                    "KEY_PASSWORD",
+                ).all { !System.getenv(it).isNullOrBlank() }
             if (hasSigningEnv) {
                 signingConfig = signingConfigs.getByName("release")
             }

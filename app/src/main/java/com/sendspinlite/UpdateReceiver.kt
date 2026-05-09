@@ -6,7 +6,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 
 class UpdateReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
+    override fun onReceive(
+        context: Context,
+        intent: Intent,
+    ) {
         if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             // Restart the app
             val packageManager: PackageManager = context.packageManager
