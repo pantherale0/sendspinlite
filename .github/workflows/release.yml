@@ -10,7 +10,12 @@ permissions:
   contents: write
 
 jobs:
+  release-checks:
+    uses: ./.github/workflows/release-checks.yml
+    secrets: inherit
+
   build-and-release:
+    needs: release-checks
     runs-on: ubuntu-latest
     environment: build
     
