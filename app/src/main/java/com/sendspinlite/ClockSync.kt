@@ -52,15 +52,18 @@ private data class TimeElement(
  *   - drift:  rate of change of offset (dimensionless, us/us)
  */
 class ClockSync(
-    processStdDev: Double = 0.01,
-    private val forgetFactor: Double = 1.001,
-    private val adaptiveCutoffFraction: Double = 0.75,
-    private val minSamplesBeforeForgetting: Int = 100
+    processStdDev: Double = 0.0,
+    driftProcessStdDev: Double = 1e-11,
+    private val forgetFactor: Double = 2.0,
+    private val adaptiveCutoffFraction: Double = 3.0,
+    private val minSamplesBeforeForgetting: Int = 100,
+    private val maxErrorScale: Double = 0.5
 ) {
     private val tag = "ClockSync"
 
     // Derived process variance (matches reference: self._process_variance = process_std_dev ** 2)
     private val processVariance: Double = processStdDev * processStdDev
+    private val driftProcessVariancePerUs: Double = driftProcessStdDev * driftProcessStdDev
 
     // Kalman filter state -- mirrors reference fields exactly
     private var lastUpdateUs: Long = 0          // _last_update
@@ -212,7 +215,7 @@ class ClockSync(
         val dt: Double = (timeAddedUs - lastUpdateUs).toDouble()
         lastUpdateUs = timeAddedUs
 
-        val updateStdDev: Double = maxError.toDouble()
+        val updateStdDev: Double = maxError.toDouble() * maxErrorScale
         val measurementVariance: Double = updateStdDev * updateStdDev
 
         // --- Multi-sample initialization phase (first 8 measurements) ---
@@ -287,7 +290,7 @@ class ClockSync(
         val dtSquared: Double = dt * dt
 
         // Covariance prediction: P_k|k-1 = F P F^T + Q
-        val driftProcessVariance = 0.0   // Drift assumed stable
+        val driftProcessVariance = dt * driftProcessVariancePerUs
         val newDriftCovariance: Double = driftCovariance + driftProcessVariance
 
         val offsetDriftProcessVariance = 0.0
@@ -373,7 +376,8 @@ class ClockSync(
     fun convertServerToClient(serverTimeUs: Long): Long {
         val te = currentTimeElement
         val baseline = baselineOffsetUs ?: 0L
-        val fullOffset = baseline + te.offset.toLong()
+        val dt = (System.nanoTime() / 1000L - te.lastUpdate).toDouble()
+        val fullOffset = baseline + (te.offset + te.drift * dt).toLong()
         val result = serverTimeUs + fullOffset
         
         if (conversionDebugCount < 3) {
@@ -387,14 +391,14 @@ class ClockSync(
     /** Estimated offset in microseconds (server - client). */
     fun estimatedOffsetUs(): Long = offset.toLong()
 
-    /** Estimated drift (dimensionless). */
-    fun estimatedDriftPpm(): Double = drift
+    /** Estimated drift in parts-per-million. */
+    fun estimatedDriftPpm(): Double = drift * 1_000_000.0
 
     /** Standard deviation of offset estimate in microseconds. */
     fun getOffsetUncertaintyUs(): Long = sqrt(offsetCovariance.coerceAtLeast(0.0)).toLong()
 
-    /** Standard deviation of drift estimate. */
-    fun getDriftUncertaintyPpm(): Double = sqrt(driftCovariance.coerceAtLeast(0.0))
+    /** Standard deviation of drift estimate in parts-per-million. */
+    fun getDriftUncertaintyPpm(): Double = sqrt(driftCovariance.coerceAtLeast(0.0)) * 1_000_000.0
 
     /** True after at least 2 measurements with finite covariance (matches reference is_synchronized). */
     fun hasConverged(): Boolean = updateCount >= 15 && offsetCovariance.isFinite()
@@ -409,7 +413,8 @@ class ClockSync(
     fun getDriftSnr(): Double {
         if (!hasConverged()) return 0.0
         val std = getDriftUncertaintyPpm()
-        return if (std > 0) abs(drift) / std else Double.POSITIVE_INFINITY
+        val driftPpm = estimatedDriftPpm()
+        return if (std > 0) abs(driftPpm) / std else Double.POSITIVE_INFINITY
     }
 
     fun getNetworkConditionQuality(): NetworkQuality {
