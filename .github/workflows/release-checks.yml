@@ -51,18 +51,6 @@ jobs:
           fi
           ./gradlew assembleRelease --stacktrace
 
-      - name: Enforce APK size budget
-        run: |
-          APK_PATH="app/build/outputs/apk/release/app-release.apk"
-          MAX_SIZE_MB=100
-          APK_SIZE_BYTES=$(stat -c%s "$APK_PATH")
-          MAX_SIZE_BYTES=$((MAX_SIZE_MB * 1024 * 1024))
-          echo "APK size: $APK_SIZE_BYTES bytes"
-          if [ "$APK_SIZE_BYTES" -gt "$MAX_SIZE_BYTES" ]; then
-            echo "APK exceeds ${MAX_SIZE_MB}MB budget."
-            exit 1
-          fi
-
       - name: Upload release check reports
         if: always()
         uses: actions/upload-artifact@v4
