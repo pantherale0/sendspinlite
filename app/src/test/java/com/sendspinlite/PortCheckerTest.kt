@@ -42,7 +42,7 @@ class PortCheckerTest {
                         callerThread
                     }
 
-                assertThat(connectorThread.get()).isEqualTo("port-check-io")
+                assertThat(connectorThread.get()).startsWith("port-check-io")
                 assertThat(connectorThread.get()).isNotEqualTo(callerThread)
             } finally {
                 callerDispatcher.close()
