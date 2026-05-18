@@ -88,6 +88,39 @@ object AudioIssueReporter {
         sb.appendLine("Kalman Errors     : ${uiState.kalmanErrorCount}")
         sb.appendLine()
 
+        sb.appendLine("=== PLAYBACK RECOVERY ===")
+        sb.appendLine("Recovery Status   : ${uiState.playbackRecoveryStatus.ifBlank { "-" }}")
+        sb.appendLine("Audio Output On   : ${uiState.audioOutputStarted}")
+        sb.appendLine("Clock Ready       : ${uiState.clockReadyForPlayback}")
+        sb.appendLine("Force Resync      : ${uiState.forceResyncActive}")
+        sb.appendLine("Discontinuity     : ${uiState.inDiscontinuityRecovery}")
+        sb.appendLine("Late Start Loops  : ${uiState.lateRestartLoops}")
+        sb.appendLine("Server Lateness   : ${uiState.serverLatenessMs} ms")
+        sb.appendLine(
+            "Last Audio Cut    : ${
+                if (uiState.lastAudioCutAgeMs < 0) {
+                    "never"
+                } else {
+                    "${uiState.lastAudioCutAgeMs} ms ago"
+                }
+            }",
+        )
+        sb.appendLine("Last Event        : ${uiState.lastRecoveryEvent.ifBlank { "-" }}")
+        sb.appendLine()
+
+        sb.appendLine("=== PLAYOUT TIMING ===")
+        sb.appendLine("Effective Ahead   : ${uiState.effectiveBufferAheadMs} ms")
+        sb.appendLine("Est. Offset       : ${uiState.estimatedOffsetMs} ms")
+        sb.appendLine("Playout Offset    : ${uiState.playoutOffsetMs} ms")
+        sb.appendLine("Decode Latency    : ${uiState.decodeLatencyMs} ms")
+        sb.appendLine("Network Jitter    : ${uiState.networkJitterMs} ms")
+        sb.appendLine("Clock Updates     : ${uiState.clockUpdateCount}")
+        sb.appendLine()
+
+        sb.appendLine("=== DIAGNOSTIC HINTS ===")
+        sb.appendLine(formatDiagnosticHints(uiState))
+        sb.appendLine()
+
         // Logcat filtered to audio-related tags only.
         // The *:S wildcard silences all other tags so only Sendspin and Android
         // audio subsystem lines are included.
@@ -96,8 +129,10 @@ object AudioIssueReporter {
             val process =
                 Runtime.getRuntime().exec(
                     arrayOf(
-                        "logcat", "-d", "-t", "500",
+                        "logcat", "-d", "-t", "800",
                         "SendspinPcmClient:V",
+                        "ClockSync:V",
+                        "PcmAudioOutput:V",
                         "PlayerViewModel:V",
                         "CrashReportingManager:V",
                         "AudioIssueReporter:V",
@@ -120,6 +155,41 @@ object AudioIssueReporter {
     }
 
     /**
+     * Short, human-readable hints derived from the snapshot (no PII).
+     */
+    internal fun formatDiagnosticHints(uiState: PlayerViewModel.UiState): String {
+        val hints = mutableListOf<String>()
+        if (!uiState.clockReadyForPlayback) {
+            hints.add(
+                "- Clock not ready for playback (converged=${uiState.clockUpdateCount >= 15}, " +
+                    "uncertainty=${uiState.offsetUncertaintyUs / 1000}ms, rtt=${uiState.rttUs / 1000}ms)",
+            )
+        }
+        if (uiState.playbackState == "playing" && !uiState.audioOutputStarted) {
+            hints.add("- Group reports playing but local AudioTrack is not started (prestart/recovery stall)")
+        }
+        if (uiState.queuedChunks >= 60 && uiState.bufferAheadMs < -30) {
+            hints.add("- Large prestart backlog with late head (possible prestart deadlock before fix)")
+        }
+        if (uiState.forceResyncActive) {
+            hints.add("- Force-resync active: expect DIAG force_resync / prestart drops in logcat")
+        }
+        if (uiState.lateDrops > 100) {
+            hints.add("- High late-drop count: clock skew, network loss, or catch-up trimming")
+        }
+        if (uiState.lastAudioCutAgeMs in 0..10_000) {
+            hints.add("- Audio cut occurred recently (check DIAG audio_cut and serverLate)")
+        }
+        if (uiState.serverLatenessMs > 150) {
+            hints.add("- Server lateness above cut threshold (${uiState.serverLatenessMs}ms)")
+        }
+        if (hints.isEmpty()) {
+            hints.add("- No automatic hints; review DIAG lines and buffer/clock sections above")
+        }
+        return hints.joinToString("\n")
+    }
+
+    /**
      * Upload [report] to Sentry as a WARNING-level event and return the Sentry
      * event ID (a UUID string) on success, or `null` if Sentry is not available /
      * not initialised / the upload fails.
@@ -127,7 +197,10 @@ object AudioIssueReporter {
      * The caller is responsible for ensuring that Sentry has been initialised
      * (i.e. crash reporting is enabled) before calling this method.
      */
-    fun uploadToSentry(report: String): String? {
+    fun uploadToSentry(
+        report: String,
+        uiState: PlayerViewModel.UiState? = null,
+    ): String? {
         if (!CrashReportingManager.isCrashReportingAvailable()) return null
         return try {
             val event =
@@ -138,6 +211,14 @@ object AudioIssueReporter {
                     setExtra("app_version", BuildConfig.VERSION_NAME)
                     setExtra("android_version", Build.VERSION.RELEASE)
                     setExtra("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+                    uiState?.let { state ->
+                        setExtra("playback_recovery_status", state.playbackRecoveryStatus)
+                        setExtra("last_recovery_event", state.lastRecoveryEvent)
+                        setExtra("clock_ready", state.clockReadyForPlayback.toString())
+                        setExtra("audio_output_started", state.audioOutputStarted.toString())
+                        setExtra("server_lateness_ms", state.serverLatenessMs.toString())
+                        setExtra("queued_chunks", state.queuedChunks.toString())
+                    }
                 }
             val hint = Hint()
             hint.addAttachment(Attachment(report.toByteArray(Charsets.UTF_8), "audio_report.txt", "text/plain"))
