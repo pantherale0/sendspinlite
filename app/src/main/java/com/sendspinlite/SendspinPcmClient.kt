@@ -1017,7 +1017,6 @@ class SendspinPcmClient(
 
                 // NEW: if output is stopped and the queue head is very late, we must drop until near-now,
                 // otherwise bufferAheadMs stays negative and we never restart (queue grows forever).
-                val restartKeepWithinUs = 20_000L // bring head within ~20ms late before (re)start
                 val restartDropTriggerAheadMs = -60L // pre-drop once head is meaningfully late
                 val restartMinAheadMs = -30L // consider late-start recovery once head is below this
                 val restartMinQueued =
