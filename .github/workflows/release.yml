@@ -81,16 +81,25 @@ jobs:
       - name: Generate changelog from commits
         id: changelog
         run: |
+          set -eo pipefail
           git fetch --tags --quiet
           
           CURRENT_TAG=${{ steps.version.outputs.tag_name }}
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$CURRENT_TAG"^ 2>/dev/null || echo "")
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
           
           if [ -z "$PREVIOUS_TAG" ]; then
             COMMIT_RANGE="HEAD"
           else
-            COMMIT_RANGE="$PREVIOUS_TAG..HEAD"
+            COMMIT_RANGE="${PREVIOUS_TAG}..HEAD"
           fi
+          
+          append_bullet_lines() {
+            while IFS= read -r line || [ -n "$line" ]; do
+              if [ -n "$line" ]; then
+                echo "- $line"
+              fi
+            done
+          }
           
           {
             echo "## Version ${{ steps.version.outputs.version_name }}"
@@ -98,36 +107,37 @@ jobs:
             echo "**Release Date:** $(date -u +'%Y-%m-%d')"
             echo ""
             
-            FEATURES=$(git log $COMMIT_RANGE --pretty=format:"%s" --all-match --grep="^feat" 2>/dev/null || true)
+            FEATURES=$(git log "$COMMIT_RANGE" --pretty=format:"%s" --all-match --grep="^feat" 2>/dev/null || true)
             if [ -n "$FEATURES" ]; then
               echo "### ✨ Features"
               echo ""
-              echo "$FEATURES" | while read -r line; do
-                echo "- $(echo "$line" | sed 's/^feat(.*): //' | sed 's/^feat: //')"
+              echo "$FEATURES" | while IFS= read -r line || [ -n "$line" ]; do
+                if [ -n "$line" ]; then
+                  echo "- $(echo "$line" | sed 's/^feat(.*): //' | sed 's/^feat: //')"
+                fi
               done
               echo ""
             fi
             
-            FIXES=$(git log $COMMIT_RANGE --pretty=format:"%s" --all-match --grep="^fix" 2>/dev/null || true)
+            FIXES=$(git log "$COMMIT_RANGE" --pretty=format:"%s" --all-match --grep="^fix" 2>/dev/null || true)
             if [ -n "$FIXES" ]; then
               echo "### 🐛 Bug Fixes"
               echo ""
-              echo "$FIXES" | while read -r line; do
-                echo "- $(echo "$line" | sed 's/^fix(.*): //' | sed 's/^fix: //')"
+              echo "$FIXES" | while IFS= read -r line || [ -n "$line" ]; do
+                if [ -n "$line" ]; then
+                  echo "- $(echo "$line" | sed 's/^fix(.*): //' | sed 's/^fix: //')"
+                fi
               done
               echo ""
             fi
             
-            # Get all commits and filter out feat/fix
-            ALL_COMMITS=$(git log $COMMIT_RANGE --pretty=format:"%s")
+            ALL_COMMITS=$(git log "$COMMIT_RANGE" --pretty=format:"%s")
             OTHER_COMMITS=$(echo "$ALL_COMMITS" | grep -v "^feat" | grep -v "^fix" | grep -v "^perf" | grep -v "^refactor" || true)
             
             if [ -n "$OTHER_COMMITS" ]; then
               echo "### 📝 Changes"
               echo ""
-              echo "$OTHER_COMMITS" | while read -r line; do
-                [ -n "$line" ] && echo "- $line"
-              done
+              echo "$OTHER_COMMITS" | append_bullet_lines
               echo ""
             fi
             
