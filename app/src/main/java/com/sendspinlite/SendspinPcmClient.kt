@@ -27,6 +27,10 @@ class SendspinPcmClient(
         private const val KEY_AUDIO_WARMUP_BASELINE_LATENCY_US = "audio_warmup_baseline_latency_us"
         private const val KEY_AUDIO_WARMUP_BASELINE_FORMAT = "audio_warmup_baseline_format"
         private const val KEY_AUDIO_WARMUP_BASELINE_TIMESTAMP_MS = "audio_warmup_baseline_timestamp_ms"
+        private const val MAX_CLOCK_UNCERTAINTY_FOR_START_US = 50_000L
+        private const val MAX_RTT_FOR_START_US = 2_000_000L
+        private const val RTT_AUDIO_CUT_INFLATE_DIVISOR = 2000L
+        private const val RTT_AUDIO_CUT_INFLATE_MAX_MS = 500L
 
         // Shared OkHttpClient to avoid leaking thread pools and connection pools on reconnect
         private val sharedOkHttp =
@@ -196,6 +200,15 @@ class SendspinPcmClient(
     private var forceResyncMode: Boolean = false
     private var forceResyncUntilUs: Long = 0L
     private var lastForceResyncLogMs: Long = 0L
+
+    @Volatile
+    private var playbackRecoveryStatus: String = PlaybackDiagnostics.STATUS_IDLE
+
+    @Volatile
+    private var lastRecoveryEvent: String = ""
+
+    @Volatile
+    private var lastPublishedServerLatenessMs: Long = 0L
 
     // Audio cut and resync configuration for handling late drops
     // When audio falls too far behind after packet loss, cut and resync instead of relying on slow playback speed
@@ -390,7 +403,15 @@ class SendspinPcmClient(
         lastChunkServerTimestampUs = Long.MIN_VALUE
         inDiscontinuityMode = false
         audioScheduleDebugCount = 0
+        playbackRecoveryStatus = PlaybackDiagnostics.STATUS_IDLE
+        lastRecoveryEvent = ""
+        lastPublishedServerLatenessMs = 0L
+        forceResyncMode = false
+        forceResyncUntilUs = 0L
+        publishTeardownUi(status)
+    }
 
+    private fun publishTeardownUi(status: String) {
         onUiUpdate {
             it.copy(
                 status = status,
@@ -401,7 +422,16 @@ class SendspinPcmClient(
                 groupName = "",
                 queuedChunks = 0,
                 bufferAheadMs = 0,
-                // Clear metadata
+                audioOutputStarted = false,
+                playbackRecoveryStatus = PlaybackDiagnostics.STATUS_IDLE,
+                lastRecoveryEvent = "",
+                clockReadyForPlayback = false,
+                forceResyncActive = false,
+                inDiscontinuityRecovery = false,
+                lateRestartLoops = 0,
+                effectiveBufferAheadMs = 0,
+                serverLatenessMs = 0,
+                lastAudioCutAgeMs = -1L,
                 trackTitle = null,
                 trackArtist = null,
                 albumTitle = null,
@@ -452,6 +482,76 @@ class SendspinPcmClient(
 
         // Calculate moving average
         decodeLatencyUs = decodeLatencySamples.average().toLong()
+    }
+
+    private fun recordRecoveryEvent(
+        event: String,
+        details: String,
+    ) {
+        val entry =
+            if (details.isBlank()) {
+                event
+            } else {
+                "$event | $details"
+            }
+        lastRecoveryEvent = entry.take(PlaybackDiagnostics.MAX_RECOVERY_EVENT_CHARS)
+        Log.i(tag, "DIAG: $entry")
+    }
+
+    private fun isClockReadyForPlayback(): Boolean =
+        clock.hasConverged() &&
+            clock.getOffsetUncertaintyUs() <= MAX_CLOCK_UNCERTAINTY_FOR_START_US &&
+            clock.getAverageRttUs() <= MAX_RTT_FOR_START_US
+
+    private fun publishPlaybackDiagnostics(
+        snapshot: AudioJitterBuffer.Snapshot,
+        recoveryStatus: String,
+        clockReady: Boolean,
+        lateRestartLoops: Int = 0,
+        serverLatenessMs: Long? = null,
+    ) {
+        playbackRecoveryStatus = recoveryStatus
+        val effectiveAheadMs = snapshot.bufferAheadMs + (playoutOffsetUs / 1000L)
+        val cutAgeMs =
+            if (lastAudioCutMs <= 0L) {
+                -1L
+            } else {
+                (System.currentTimeMillis() - lastAudioCutMs).coerceAtLeast(0L)
+            }
+        val latenessMs =
+            serverLatenessMs ?: lastPublishedServerLatenessMs
+        if (serverLatenessMs != null) {
+            lastPublishedServerLatenessMs = serverLatenessMs
+        }
+        throttledUiUpdate {
+            it.copy(
+                audioOutputStarted = output.isStarted(),
+                playbackRecoveryStatus = recoveryStatus,
+                lastRecoveryEvent = lastRecoveryEvent,
+                clockReadyForPlayback = clockReady,
+                forceResyncActive = forceResyncMode,
+                inDiscontinuityRecovery = inDiscontinuityMode,
+                lateRestartLoops = lateRestartLoops,
+                effectiveBufferAheadMs = effectiveAheadMs,
+                estimatedOffsetMs = clock.estimatedOffsetUs() / 1000L,
+                decodeLatencyMs = decodeLatencyUs / 1000L,
+                playoutOffsetMs = (playoutOffsetUs + playoutOffsetAdjustmentUs) / 1000L,
+                networkJitterMs = clock.getEstimatedNetworkJitterUs() / 1000L,
+                clockUpdateCount = clock.getUpdateCount(),
+                driftUncertaintyPpm = clock.getDriftUncertaintyPpm(),
+                driftSnr = clock.getDriftSnr(),
+                serverLatenessMs = latenessMs,
+                lastAudioCutAgeMs = cutAgeMs,
+                queuedChunks = snapshot.queuedChunks,
+                bufferAheadMs = snapshot.bufferAheadMs,
+                lateDrops = snapshot.lateDrops,
+                offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
+                driftPpm = clock.estimatedDriftPpm(),
+                rttUs = clock.getAverageRttUs(),
+                audibleSyncCount = audibleSyncCount,
+                kalmanErrorCount = clock.getKalmanErrorCount(),
+            )
+        }
     }
 
     private fun throttledUiUpdate(block: (PlayerViewModel.UiState) -> PlayerViewModel.UiState) {
@@ -663,12 +763,13 @@ class SendspinPcmClient(
                     // Signal that stats loop is alive
                     lastStatsHeartbeatMs = System.currentTimeMillis()
 
-                    // Update UI with clock sync details - runs every 1 second for responsive updates
+                    publishPlaybackDiagnostics(
+                        snapshot = snapshot,
+                        recoveryStatus = playbackRecoveryStatus,
+                        clockReady = isClockReadyForPlayback(),
+                    )
                     throttledUiUpdate {
                         it.copy(
-                            offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
-                            driftPpm = clock.estimatedDriftPpm(),
-                            rttUs = clock.getAverageRttUs(),
                             networkQuality = clock.getNetworkConditionQuality().toString(),
                             stability = clock.getClockStability().toString(),
                             connectionType = getConnectionType(),
@@ -916,12 +1017,12 @@ class SendspinPcmClient(
 
                 // NEW: if output is stopped and the queue head is very late, we must drop until near-now,
                 // otherwise bufferAheadMs stays negative and we never restart (queue grows forever).
-                val restartKeepWithinUs = 20_000L // bring head within ~20ms late before (re)start
                 val restartDropTriggerAheadMs = -60L // pre-drop once head is meaningfully late
                 val restartMinAheadMs = -30L // consider late-start recovery once head is below this
                 val restartMinQueued =
                     4 // allow recovery to begin sooner on constrained devices
                 val forceStartAfterLoops = 80 // ~0.8s with 10ms retry delay
+                val prestartBacklogChunkThreshold = 60 // trim aggressively when prestart queue grows
 
                 var lateRestartLoops = 0
                 var restartBackoffMs = 200L
@@ -933,24 +1034,16 @@ class SendspinPcmClient(
                     // Signal that playback loop is alive
                     lastPlaybackHeartbeatMs = System.currentTimeMillis()
 
-                    // Throttle UI updates to prevent excessive recomposition on low-memory devices
-                    throttledUiUpdate {
-                        it.copy(
-                            queuedChunks = snapshot.queuedChunks,
-                            bufferAheadMs = snapshot.bufferAheadMs,
-                            lateDrops = snapshot.lateDrops,
-                            offsetUncertaintyUs = clock.getOffsetUncertaintyUs(),
-                            driftPpm = clock.estimatedDriftPpm(),
-                            rttUs = clock.getAverageRttUs(),
-                            audibleSyncCount = audibleSyncCount,
-                            kalmanErrorCount = clock.getKalmanErrorCount(),
-                        )
-                    }
-
                     if (!output.isStarted()) {
                         val nowLocalUs = nowUs()
                         if (nextStartAttemptUs > nowLocalUs) {
                             val waitMs = ((nextStartAttemptUs - nowLocalUs) / 1000L).coerceAtLeast(10L)
+                            publishPlaybackDiagnostics(
+                                snapshot = snapshot,
+                                recoveryStatus = PlaybackDiagnostics.STATUS_START_BACKOFF,
+                                clockReady = isClockReadyForPlayback(),
+                                lateRestartLoops = lateRestartLoops,
+                            )
                             delay(waitMs)
                             continue
                         }
@@ -963,16 +1056,53 @@ class SendspinPcmClient(
                         // One-time warmup baseline: run on first launch and after app updates.
                         runAudioWarmupIfNeeded()
 
-                        // NEW: prevent deadlock when head is late (negative ahead) by dropping late chunks now.
+                        val clockReadyForPlayback = isClockReadyForPlayback()
+
+                        if (!clockReadyForPlayback) {
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_WAITING_CLOCK
+                            // Poor WiFi can produce multi-second RTT bursts; starting before the
+                            // filter converges causes false lateness, audio-cut thrash, and backlog growth.
+                            if (snapshot.queuedChunks > 0) {
+                                val dropped = jitter.dropWhileLate(nowUs(), 100_000L)
+                                if (dropped > 0) {
+                                    val nowMs = System.currentTimeMillis()
+                                    if (nowMs - lastRestartCatchupLogMs >= 1000L) {
+                                        lastRestartCatchupLogMs = nowMs
+                                        recordRecoveryEvent(
+                                            PlaybackDiagnostics.STATUS_WAITING_CLOCK,
+                                            "dropped=$dropped " +
+                                                "uncertainty=${clock.getOffsetUncertaintyUs() / 1000}ms " +
+                                                "rtt=${clock.getAverageRttUs() / 1000}ms " +
+                                                "converged=${clock.hasConverged()}",
+                                        )
+                                    }
+                                }
+                            }
+                            publishPlaybackDiagnostics(
+                                snapshot = jitter.snapshot(),
+                                recoveryStatus = PlaybackDiagnostics.STATUS_WAITING_CLOCK,
+                                clockReady = false,
+                                lateRestartLoops = lateRestartLoops,
+                            )
+                            delay(50)
+                            continue
+                        }
+
+                        // Prevent deadlock when head is late (negative ahead) by dropping late chunks now.
                         if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartDropTriggerAheadMs) {
-                            val dropped = jitter.dropWhileLate(nowUs(), restartKeepWithinUs)
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_CATCHUP
+                            val targetAheadMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
+                            // Always trim to the start window; lateness-based drop can leave
+                            // the head outside force-resync (-10..90ms).
+                            val dropped = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
                             if (dropped > 0) {
                                 val nowMs = System.currentTimeMillis()
                                 if (nowMs - lastRestartCatchupLogMs >= 1000L) {
                                     lastRestartCatchupLogMs = nowMs
-                                    Log.w(
-                                        tag,
-                                        "restart-catchup: dropped=$dropped head was late (ahead~${snapshot.bufferAheadMs}ms)",
+                                    recordRecoveryEvent(
+                                        PlaybackDiagnostics.STATUS_PRESTART_CATCHUP,
+                                        "dropped=$dropped ahead=${snapshot.bufferAheadMs}ms " +
+                                            "queued=${snapshot.queuedChunks}",
                                     )
                                 }
                             }
@@ -981,52 +1111,86 @@ class SendspinPcmClient(
                         val snap2 = jitter.snapshot()
 
                         if (forceResyncMode) {
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_FORCE_RESYNC_PRESTART
                             // While recovering from audioserver death, drop stale audio more aggressively
                             // so we rejoin the live timeline quickly.
-                            val dropped = jitter.dropWhileLate(nowUs(), 40_000L)
+                            val targetAheadMs = resyncMinBufferMs
+                            val dropped = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
                             if (dropped > 0) {
                                 val nowMs = System.currentTimeMillis()
                                 if (nowMs - lastForceResyncLogMs >= 1000L) {
                                     lastForceResyncLogMs = nowMs
-                                    Log.w(tag, "force-resync prestart: dropped=$dropped stale chunks")
+                                    recordRecoveryEvent(
+                                        PlaybackDiagnostics.STATUS_FORCE_RESYNC_PRESTART,
+                                        "dropped=$dropped ahead=${snap2.bufferAheadMs}ms queued=${snap2.queuedChunks}",
+                                    )
                                 }
                             }
                         }
 
+                        // Large prestart backlog with a nearly-live head: trim to the start window in one pass.
+                        if (snap2.queuedChunks >= prestartBacklogChunkThreshold && snap2.bufferAheadMs < restartMinAheadMs) {
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_BACKLOG_TRIM
+                            val targetAheadMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
+                            val trimmed = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
+                            if (trimmed > 0) {
+                                val nowMs = System.currentTimeMillis()
+                                if (nowMs - lastRestartCatchupLogMs >= 1000L) {
+                                    lastRestartCatchupLogMs = nowMs
+                                    recordRecoveryEvent(
+                                        PlaybackDiagnostics.STATUS_PRESTART_BACKLOG_TRIM,
+                                        "dropped=$trimmed queued=${snap2.queuedChunks} ahead=${snap2.bufferAheadMs}ms",
+                                    )
+                                }
+                            }
+                        }
+
+                        val snapForStart = jitter.snapshot()
+
                         // Calculate effective buffer ahead accounting for playout offset
                         // Chunks will actually be needed playoutOffsetUs in the future (negative offset = sooner)
-                        val effectiveBufferAheadMs = snap2.bufferAheadMs + (playoutOffsetUs / 1000L)
+                        val effectiveBufferAheadMs = snapForStart.bufferAheadMs + (playoutOffsetUs / 1000L)
 
                         val startMinMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
                         val startMaxMs = if (forceResyncMode) resyncMaxStartAheadMs else maxStartAheadMs
+                        val discontinuityStartMinMs = -80L
+                        val discontinuityStartMaxMs = 250L
+                        val activeStartMinMs =
+                            if (inDiscontinuityMode) discontinuityStartMinMs else startMinMs
+                        val activeStartMaxMs =
+                            if (inDiscontinuityMode) discontinuityStartMaxMs else startMaxMs
 
                         // Start window is based on raw ahead; effective offset is handled in scheduling.
                         val canStartNormally =
-                            snap2.queuedChunks >= restartMinQueued &&
-                                snap2.bufferAheadMs in startMinMs..startMaxMs
+                            snapForStart.queuedChunks >= restartMinQueued &&
+                                snapForStart.bufferAheadMs in activeStartMinMs..activeStartMaxMs
 
                         // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
                         // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
-                        if (!canStartNormally && snap2.queuedChunks >= restartMinQueued && snap2.bufferAheadMs < restartMinAheadMs) {
+                        if (!canStartNormally && snapForStart.queuedChunks >= restartMinQueued && snapForStart.bufferAheadMs < restartMinAheadMs) {
                             lateRestartLoops++
-                        } else {
+                        } else if (canStartNormally) {
+                            // Do not reset the counter when ahead oscillates around restartMinAheadMs
+                            // while still outside the normal start window — that prevented force-late-start.
                             lateRestartLoops = 0
                         }
 
                         // If we remain late for a while, allow bounded late-start recovery instead of
                         // endless prestart dropping (which can deadlock playback on constrained devices).
                         val canStartLateRecovery =
-                            lateRestartLoops >= 20 && snap2.bufferAheadMs >= -50L
+                            lateRestartLoops >= 20 && snapForStart.bufferAheadMs >= -50L
 
                         val forceLateStart =
-                            lateRestartLoops >= forceStartAfterLoops && snap2.bufferAheadMs >= -40L
+                            lateRestartLoops >= forceStartAfterLoops && snapForStart.bufferAheadMs >= -40L
                         val canStart = canStartNormally || canStartLateRecovery || forceLateStart
 
                         if (canStart) {
                             if ((forceLateStart || canStartLateRecovery) && !canStartNormally) {
-                                Log.w(
-                                    tag,
-                                    "forcing late-start recovery: ahead=${snap2.bufferAheadMs}ms effectiveAhead=${effectiveBufferAheadMs}ms queued=${snap2.queuedChunks}",
+                                playbackRecoveryStatus = PlaybackDiagnostics.STATUS_LATE_START_RECOVERY
+                                recordRecoveryEvent(
+                                    PlaybackDiagnostics.STATUS_LATE_START_RECOVERY,
+                                    "ahead=${snapForStart.bufferAheadMs}ms effective=$effectiveBufferAheadMs ms " +
+                                        "queued=${snapForStart.queuedChunks} loops=$lateRestartLoops",
                                 )
                                 // If we're more than 100ms behind on forced late-start, trigger resync to snap to live
                                 // instead of waiting for slow catch-up via playback speed adjustment
@@ -1047,6 +1211,9 @@ class SendspinPcmClient(
                                 continue
                             }
                             outputStartedAtUs = nowUs()
+                            if (inDiscontinuityMode) {
+                                inDiscontinuityMode = false
+                            }
 
                             // Initialize Opus decoder if needed
                             if (codec == "opus") {
@@ -1065,11 +1232,24 @@ class SendspinPcmClient(
                             lateRestartLoops = 0
                             restartBackoffMs = 200L
                             nextStartAttemptUs = 0L
-                            Log.i(
-                                tag,
-                                "Audio output started sr=$sampleRate ch=$channels bd=$bitDepth codec=$codec (buffered=${snap2.bufferAheadMs}ms)",
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PLAYING
+                            recordRecoveryEvent(
+                                PlaybackDiagnostics.STATUS_PLAYING,
+                                "sr=$sampleRate ch=$channels codec=$codec buffered=${snapForStart.bufferAheadMs}ms " +
+                                    "effective=$effectiveBufferAheadMs ms",
+                            )
+                            publishPlaybackDiagnostics(
+                                snapshot = jitter.snapshot(),
+                                recoveryStatus = PlaybackDiagnostics.STATUS_PLAYING,
+                                clockReady = true,
                             )
                         } else {
+                            publishPlaybackDiagnostics(
+                                snapshot = snapForStart,
+                                recoveryStatus = playbackRecoveryStatus,
+                                clockReady = clockReadyForPlayback,
+                                lateRestartLoops = lateRestartLoops,
+                            )
                             delay(10)
                             continue
                         }
@@ -1078,9 +1258,14 @@ class SendspinPcmClient(
                     val chunk = jitter.pollPlayable(nowUs(), lateDropUs)
                     if (chunk == null) {
                         if (jitter.isEmpty()) {
-                            // Throttle error state messages to prevent spam (already throttled in sendClientStateError)
-                            // Removed aggressive silence flushing here to prevent jitter
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_UNDERRUN
                         }
+                        publishPlaybackDiagnostics(
+                            snapshot = jitter.snapshot(),
+                            recoveryStatus = playbackRecoveryStatus,
+                            clockReady = true,
+                            serverLatenessMs = lastPublishedServerLatenessMs,
+                        )
                         delay(2)
                         continue
                     }
@@ -1153,6 +1338,7 @@ class SendspinPcmClient(
                     val serverLatenessMs = -(earlyUs - totalPlayoutOffsetUs) / 1000L
 
                     if (forceResyncMode) {
+                        playbackRecoveryStatus = PlaybackDiagnostics.STATUS_FORCE_RESYNC_RUNTIME
                         // If still late during forced resync, drop to near-live instead of gradually drifting.
                         // Compare against server-time lateness so that devices with large staticDelayMs
                         // or pipeline offset don't spuriously discard all buffered audio.
@@ -1172,7 +1358,10 @@ class SendspinPcmClient(
                         if (serverLatenessMs < 40L || nowUs() >= forceResyncUntilUs) {
                             forceResyncMode = false
                             forceResyncUntilUs = 0L
-                            Log.i(tag, "force-resync complete: serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")
+                            recordRecoveryEvent(
+                                "force_resync_complete",
+                                "serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms",
+                            )
                         }
                     }
 
@@ -1185,13 +1374,23 @@ class SendspinPcmClient(
                     val startupCutGraceActive = sinceOutputStartUs < startupCutGraceUs
                     val effectiveOutOfSyncThresholdMs =
                         if (startupCutGraceActive) (audioOutOfSyncThresholdMs + 120L) else audioOutOfSyncThresholdMs
+                    val rttInflatedThresholdMs =
+                        if (clock.getAverageRttUs() > MAX_RTT_FOR_START_US) {
+                            effectiveOutOfSyncThresholdMs +
+                                (clock.getAverageRttUs() / RTT_AUDIO_CUT_INFLATE_DIVISOR)
+                                    .coerceAtMost(RTT_AUDIO_CUT_INFLATE_MAX_MS)
+                        } else {
+                            effectiveOutOfSyncThresholdMs
+                        }
 
-                    if (!forceResyncMode && serverLatenessMs > effectiveOutOfSyncThresholdMs && timeSinceLastCutMs > 500L) {
+                    if (!forceResyncMode && serverLatenessMs > rttInflatedThresholdMs && timeSinceLastCutMs > 500L) {
                         val snapBeforeCut = jitter.snapshot()
                         val lateDropsCount = snapBeforeCut.lateDrops
-                        Log.w(
-                            tag,
-                            "audio-cut triggered: too far behind (serverLate=${serverLatenessMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing.",
+                        playbackRecoveryStatus = PlaybackDiagnostics.STATUS_AUDIO_CUT
+                        recordRecoveryEvent(
+                            PlaybackDiagnostics.STATUS_AUDIO_CUT,
+                            "serverLate=${serverLatenessMs}ms threshold=$rttInflatedThresholdMs ms " +
+                                "lateDrops=$lateDropsCount queued=${snapBeforeCut.queuedChunks}",
                         )
                         output.stop()
                         outputStartedAtUs = 0L
@@ -1212,6 +1411,7 @@ class SendspinPcmClient(
                     // Use server-time lateness so a large staticDelayMs does not trigger spurious catch-up.
                     val dropLateThresholdMs = dropLateUs / 1000L
                     if (serverLatenessMs > dropLateThresholdMs) {
+                        playbackRecoveryStatus = PlaybackDiagnostics.STATUS_CATCHUP_DROP
                         var dropped = 1
                         val maxDrops = 50 // Prevent unbounded dropping that causes ANR
                         val catchupStart = nowUs()
@@ -1260,13 +1460,28 @@ class SendspinPcmClient(
                         }
                         if (dropped > 1) {
                             audibleSyncCount++
-                            Log.w(
-                                tag,
-                                "catch-up: dropped=$dropped (${(nowUs() - catchupStart) / 1000}ms) playoutOffset=${playoutOffsetUs / 1000}ms adjustment=${playoutOffsetAdjustmentUs / 1000}ms (audibleSyncCount=$audibleSyncCount)",
+                            recordRecoveryEvent(
+                                PlaybackDiagnostics.STATUS_CATCHUP_DROP,
+                                "dropped=$dropped durationMs=${(nowUs() - catchupStart) / 1000} " +
+                                    "serverLate=${serverLatenessMs}ms audibleSyncs=$audibleSyncCount",
                             )
                         }
+                        publishPlaybackDiagnostics(
+                            snapshot = jitter.snapshot(),
+                            recoveryStatus = playbackRecoveryStatus,
+                            clockReady = true,
+                            serverLatenessMs = serverLatenessMs,
+                        )
                         continue
                     }
+
+                    playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PLAYING
+                    publishPlaybackDiagnostics(
+                        snapshot = jitter.snapshot(),
+                        recoveryStatus = PlaybackDiagnostics.STATUS_PLAYING,
+                        clockReady = true,
+                        serverLatenessMs = serverLatenessMs,
+                    )
 
                     // Sleep until we're exactly one pipeline-latency before the intended play time.
                     // This ensures data reaches the speaker at the correct moment regardless of buffer depth.
@@ -1673,6 +1888,12 @@ class SendspinPcmClient(
                         )
                         jitter.clear()
                         inDiscontinuityMode = true
+                        playbackRecoveryStatus = PlaybackDiagnostics.STATUS_DISCONTINUITY
+                        recordRecoveryEvent(
+                            PlaybackDiagnostics.STATUS_DISCONTINUITY,
+                            "jump=${timestampJumpUs / 1000}ms",
+                        )
+                        triggerForceResync("stream_discontinuity")
                     }
                 }
 
@@ -1703,7 +1924,7 @@ class SendspinPcmClient(
         val nowMs = System.currentTimeMillis()
         if (nowMs - lastForceResyncLogMs >= 1000L) {
             lastForceResyncLogMs = nowMs
-            Log.w(tag, "force-resync triggered ($reason), dropped=$dropped")
+            recordRecoveryEvent("force_resync", "reason=$reason dropped=$dropped")
         }
     }
 

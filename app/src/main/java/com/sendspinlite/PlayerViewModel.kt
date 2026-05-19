@@ -159,6 +159,22 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         // Remote player delay (spec: static_delay_ms, 0-5000ms)
         val staticDelayMs: Long = DEFAULT_STATIC_DELAY_MS,
         val staticDelayMsFromServer: Boolean = false,
+        // Playback pipeline diagnostics (for UI, logs, and audio issue reports)
+        val audioOutputStarted: Boolean = false,
+        val playbackRecoveryStatus: String = PlaybackDiagnostics.STATUS_IDLE,
+        val lastRecoveryEvent: String = "",
+        val clockReadyForPlayback: Boolean = false,
+        val forceResyncActive: Boolean = false,
+        val inDiscontinuityRecovery: Boolean = false,
+        val lateRestartLoops: Int = 0,
+        val effectiveBufferAheadMs: Long = 0,
+        val estimatedOffsetMs: Long = 0,
+        val decodeLatencyMs: Long = 0,
+        val playoutOffsetMs: Long = 0,
+        val networkJitterMs: Long = 0,
+        val clockUpdateCount: Int = 0,
+        val serverLatenessMs: Long = 0,
+        val lastAudioCutAgeMs: Long = -1L,
     )
 
     private val _ui =

@@ -105,6 +105,31 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
     }
 
     /**
+     * Drop buffered chunks from the head until the queue head is at least [minAheadMs]
+     * ahead of server "now" (or the queue is empty). Used to escape prestart deadlocks where
+     * a large backlog builds while output is stopped and single-chunk drops cannot catch up.
+     */
+    fun dropUntilHeadAheadAtLeast(
+        nowLocalUs: Long,
+        minAheadMs: Long,
+        maxDrops: Int = maxBufferChunks,
+    ): Int {
+        val nowServerUs = clockSync.convertClientToServer(nowLocalUs)
+        var dropped = 0
+        synchronized(q) {
+            while (dropped < maxDrops) {
+                val head = q.peek() ?: break
+                val aheadMs = (head.serverTimestampUs - nowServerUs) / 1000L
+                if (aheadMs >= minAheadMs) break
+                q.poll()
+                lateDropsCounter.incrementAndGet()
+                dropped++
+            }
+        }
+        return dropped
+    }
+
+    /**
      * Returns the next playable chunk (based on local time mapping),
      * dropping anything that is too late.
      */

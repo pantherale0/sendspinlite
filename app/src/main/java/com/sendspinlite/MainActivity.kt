@@ -578,7 +578,7 @@ private fun PlayerScreen(
                                 isCollectingAudioReport = true
                                 scope.launch(Dispatchers.IO) {
                                     val report = AudioIssueReporter.buildReport(ui)
-                                    val eventId = AudioIssueReporter.uploadToSentry(report)
+                                    val eventId = AudioIssueReporter.uploadToSentry(report, ui)
                                     withContext(Dispatchers.Main) {
                                         audioIssueSentryEventId = eventId
                                         isCollectingAudioReport = false
@@ -1008,6 +1008,53 @@ private fun PlayerScreen(
                             color = MaterialTheme.colors.error,
                         )
                     }
+
+                    val recoveryColor =
+                        when (ui.playbackRecoveryStatus) {
+                            PlaybackDiagnostics.STATUS_PLAYING,
+                            PlaybackDiagnostics.STATUS_IDLE,
+                            -> Color.Green
+
+                            PlaybackDiagnostics.STATUS_WAITING_CLOCK,
+                            PlaybackDiagnostics.STATUS_START_BACKOFF,
+                            -> Color(0xFFFFA500)
+
+                            else -> MaterialTheme.colors.error
+                        }
+                    SyncInfoRow(
+                        "Recovery",
+                        ui.playbackRecoveryStatus.ifBlank { "-" },
+                        recoveryColor,
+                    )
+                    if (!ui.audioOutputStarted && ui.playbackState == "playing") {
+                        SyncInfoRow(
+                            "Output",
+                            "not started",
+                            color = MaterialTheme.colors.error,
+                        )
+                    }
+                    if (ui.clockReadyForPlayback.not() && ui.connected) {
+                        SyncInfoRow(
+                            "Clock Gate",
+                            "waiting",
+                            color = Color(0xFFFFA500),
+                        )
+                    }
+                    if (ui.serverLatenessMs > PlaybackDiagnostics.UI_SERVER_LATENESS_WARN_MS) {
+                        SyncInfoRow(
+                            "Server Late",
+                            "${ui.serverLatenessMs}ms",
+                            color = MaterialTheme.colors.error,
+                        )
+                    }
+                    if (ui.lastRecoveryEvent.isNotBlank()) {
+                        Text(
+                            text = "Last: ${ui.lastRecoveryEvent}",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
                 }
             }
         }
@@ -1155,6 +1202,18 @@ private fun exportAndShareLogs(
         stringBuilder.append("\nStatistics:\n")
         stringBuilder.append("  Audible Sync Count: ${uiState.audibleSyncCount}\n")
         stringBuilder.append("  Kalman Error Count: ${uiState.kalmanErrorCount}\n")
+        stringBuilder.append("\nPlayback Recovery:\n")
+        stringBuilder.append("  Recovery Status: ${uiState.playbackRecoveryStatus}\n")
+        stringBuilder.append("  Audio Output Started: ${uiState.audioOutputStarted}\n")
+        stringBuilder.append("  Clock Ready: ${uiState.clockReadyForPlayback}\n")
+        stringBuilder.append("  Force Resync: ${uiState.forceResyncActive}\n")
+        stringBuilder.append("  Late Start Loops: ${uiState.lateRestartLoops}\n")
+        stringBuilder.append("  Server Lateness: ${uiState.serverLatenessMs}ms\n")
+        stringBuilder.append("  Effective Buffer Ahead: ${uiState.effectiveBufferAheadMs}ms\n")
+        stringBuilder.append("  Last Recovery Event: ${uiState.lastRecoveryEvent.ifBlank { "-" }}\n")
+        stringBuilder.append("\nDiagnostic Hints:\n")
+        stringBuilder.append(AudioIssueReporter.formatDiagnosticHints(uiState))
+        stringBuilder.append("\n")
         stringBuilder.append("\nVolume:\n")
         stringBuilder.append("  Group Volume: ${uiState.groupVolume}%\n")
         stringBuilder.append("  Group Muted: ${uiState.groupMuted}\n")
