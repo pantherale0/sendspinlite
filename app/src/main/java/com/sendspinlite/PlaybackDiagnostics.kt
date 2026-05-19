@@ -5,6 +5,15 @@ package com.sendspinlite
  * Keep values stable — they are compared in reports and may appear in Sentry extras.
  */
 object PlaybackDiagnostics {
+    const val CLOCK_CONVERGED_MIN_UPDATES = 15
+    const val PRESTART_BACKLOG_CHUNK_THRESHOLD = 60
+    const val PRESTART_LATE_HEAD_MS = -30L
+    const val HIGH_LATE_DROP_COUNT = 100L
+    const val RECENT_AUDIO_CUT_MAX_AGE_MS = 10_000L
+    const val AUDIO_CUT_SERVER_LATE_MS = 150L
+    const val UI_SERVER_LATENESS_WARN_MS = 80L
+    const val MAX_RECOVERY_EVENT_CHARS = 220
+
     const val STATUS_IDLE = "idle"
     const val STATUS_PLAYING = "playing"
     const val STATUS_WAITING_CLOCK = "waiting_clock_sync"

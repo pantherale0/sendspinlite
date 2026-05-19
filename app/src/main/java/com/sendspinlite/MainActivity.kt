@@ -1040,7 +1040,7 @@ private fun PlayerScreen(
                             color = Color(0xFFFFA500),
                         )
                     }
-                    if (ui.serverLatenessMs > 80) {
+                    if (ui.serverLatenessMs > PlaybackDiagnostics.UI_SERVER_LATENESS_WARN_MS) {
                         SyncInfoRow(
                             "Server Late",
                             "${ui.serverLatenessMs}ms",

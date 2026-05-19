@@ -26,16 +26,17 @@ class AudioJitterBufferTest {
 
     @Test
     fun dropUntilHeadAheadAtLeast_dropsUntilHeadReachesTargetAhead() {
-        buffer.offer(serverTsUs = 1_000, pcm = byteArrayOf(1))
-        buffer.offer(serverTsUs = 2_000, pcm = byteArrayOf(2))
-        buffer.offer(serverTsUs = 3_000, pcm = byteArrayOf(3))
-        buffer.offer(serverTsUs = 5_000, pcm = byteArrayOf(4))
+        // Timestamps are microseconds; values must be large enough that (delta / 1000) is in ms.
+        buffer.offer(serverTsUs = 1_000_000, pcm = byteArrayOf(1))
+        buffer.offer(serverTsUs = 2_000_000, pcm = byteArrayOf(2))
+        buffer.offer(serverTsUs = 3_000_000, pcm = byteArrayOf(3))
+        buffer.offer(serverTsUs = 5_000_000, pcm = byteArrayOf(4))
 
-        val dropped = buffer.dropUntilHeadAheadAtLeast(nowLocalUs = 5_200, minAheadMs = -250L)
+        val dropped = buffer.dropUntilHeadAheadAtLeast(nowLocalUs = 5_200_000, minAheadMs = -250L)
 
         assertThat(dropped).isEqualTo(3)
-        assertThat(buffer.snapshot().bufferAheadMs).isAtLeast(-250L)
         assertThat(buffer.snapshot().queuedChunks).isEqualTo(1)
+        assertThat(buffer.snapshot().headServerUs).isEqualTo(5_000_000L)
     }
 
     @Test

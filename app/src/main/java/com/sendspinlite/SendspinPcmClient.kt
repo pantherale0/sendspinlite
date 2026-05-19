@@ -29,6 +29,8 @@ class SendspinPcmClient(
         private const val KEY_AUDIO_WARMUP_BASELINE_TIMESTAMP_MS = "audio_warmup_baseline_timestamp_ms"
         private const val MAX_CLOCK_UNCERTAINTY_FOR_START_US = 50_000L
         private const val MAX_RTT_FOR_START_US = 2_000_000L
+        private const val RTT_AUDIO_CUT_INFLATE_DIVISOR = 2000L
+        private const val RTT_AUDIO_CUT_INFLATE_MAX_MS = 500L
 
         // Shared OkHttpClient to avoid leaking thread pools and connection pools on reconnect
         private val sharedOkHttp =
@@ -406,7 +408,10 @@ class SendspinPcmClient(
         lastPublishedServerLatenessMs = 0L
         forceResyncMode = false
         forceResyncUntilUs = 0L
+        publishTeardownUi(status)
+    }
 
+    private fun publishTeardownUi(status: String) {
         onUiUpdate {
             it.copy(
                 status = status,
@@ -427,7 +432,6 @@ class SendspinPcmClient(
                 effectiveBufferAheadMs = 0,
                 serverLatenessMs = 0,
                 lastAudioCutAgeMs = -1L,
-                // Clear metadata
                 trackTitle = null,
                 trackArtist = null,
                 albumTitle = null,
@@ -490,7 +494,7 @@ class SendspinPcmClient(
             } else {
                 "$event | $details"
             }
-        lastRecoveryEvent = entry.take(220)
+        lastRecoveryEvent = entry.take(PlaybackDiagnostics.MAX_RECOVERY_EVENT_CHARS)
         Log.i(tag, "DIAG: $entry")
     }
 
@@ -1067,8 +1071,10 @@ class SendspinPcmClient(
                                         lastRestartCatchupLogMs = nowMs
                                         recordRecoveryEvent(
                                             PlaybackDiagnostics.STATUS_WAITING_CLOCK,
-                                            "dropped=$dropped uncertainty=${clock.getOffsetUncertaintyUs() / 1000}ms " +
-                                                "rtt=${clock.getAverageRttUs() / 1000}ms converged=${clock.hasConverged()}",
+                                            "dropped=$dropped " +
+                                                "uncertainty=${clock.getOffsetUncertaintyUs() / 1000}ms " +
+                                                "rtt=${clock.getAverageRttUs() / 1000}ms " +
+                                                "converged=${clock.hasConverged()}",
                                         )
                                     }
                                 }
@@ -1099,7 +1105,8 @@ class SendspinPcmClient(
                                     lastRestartCatchupLogMs = nowMs
                                     recordRecoveryEvent(
                                         PlaybackDiagnostics.STATUS_PRESTART_CATCHUP,
-                                        "dropped=$dropped ahead=${snapshot.bufferAheadMs}ms queued=${snapshot.queuedChunks}",
+                                        "dropped=$dropped ahead=${snapshot.bufferAheadMs}ms " +
+                                            "queued=${snapshot.queuedChunks}",
                                     )
                                 }
                             }
@@ -1378,7 +1385,9 @@ class SendspinPcmClient(
                         if (startupCutGraceActive) (audioOutOfSyncThresholdMs + 120L) else audioOutOfSyncThresholdMs
                     val rttInflatedThresholdMs =
                         if (clock.getAverageRttUs() > MAX_RTT_FOR_START_US) {
-                            effectiveOutOfSyncThresholdMs + (clock.getAverageRttUs() / 2000L).coerceAtMost(500L)
+                            effectiveOutOfSyncThresholdMs +
+                                (clock.getAverageRttUs() / RTT_AUDIO_CUT_INFLATE_DIVISOR)
+                                    .coerceAtMost(RTT_AUDIO_CUT_INFLATE_MAX_MS)
                         } else {
                             effectiveOutOfSyncThresholdMs
                         }

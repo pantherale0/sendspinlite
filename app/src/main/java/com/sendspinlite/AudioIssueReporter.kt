@@ -27,6 +27,7 @@ import java.util.Locale
 object AudioIssueReporter {
     private const val TAG = "AudioIssueReporter"
     private const val REPORT_FILE = "sendspin_audio_report.txt"
+    private const val US_PER_MS = 1000L
 
     /**
      * Build a privacy-redacted diagnostics report focused on the audio pipeline.
@@ -161,26 +162,30 @@ object AudioIssueReporter {
         val hints = mutableListOf<String>()
         if (!uiState.clockReadyForPlayback) {
             hints.add(
-                "- Clock not ready for playback (converged=${uiState.clockUpdateCount >= 15}, " +
-                    "uncertainty=${uiState.offsetUncertaintyUs / 1000}ms, rtt=${uiState.rttUs / 1000}ms)",
+                "- Clock not ready for playback " +
+                    "(converged=${uiState.clockUpdateCount >= PlaybackDiagnostics.CLOCK_CONVERGED_MIN_UPDATES}, " +
+                    "uncertainty=${uiState.offsetUncertaintyUs / US_PER_MS}ms, " +
+                    "rtt=${uiState.rttUs / US_PER_MS}ms)",
             )
         }
         if (uiState.playbackState == "playing" && !uiState.audioOutputStarted) {
             hints.add("- Group reports playing but local AudioTrack is not started (prestart/recovery stall)")
         }
-        if (uiState.queuedChunks >= 60 && uiState.bufferAheadMs < -30) {
+        if (uiState.queuedChunks >= PlaybackDiagnostics.PRESTART_BACKLOG_CHUNK_THRESHOLD &&
+            uiState.bufferAheadMs < PlaybackDiagnostics.PRESTART_LATE_HEAD_MS
+        ) {
             hints.add("- Large prestart backlog with late head (possible prestart deadlock before fix)")
         }
         if (uiState.forceResyncActive) {
             hints.add("- Force-resync active: expect DIAG force_resync / prestart drops in logcat")
         }
-        if (uiState.lateDrops > 100) {
+        if (uiState.lateDrops > PlaybackDiagnostics.HIGH_LATE_DROP_COUNT) {
             hints.add("- High late-drop count: clock skew, network loss, or catch-up trimming")
         }
-        if (uiState.lastAudioCutAgeMs in 0..10_000) {
+        if (uiState.lastAudioCutAgeMs in 0..PlaybackDiagnostics.RECENT_AUDIO_CUT_MAX_AGE_MS) {
             hints.add("- Audio cut occurred recently (check DIAG audio_cut and serverLate)")
         }
-        if (uiState.serverLatenessMs > 150) {
+        if (uiState.serverLatenessMs > PlaybackDiagnostics.AUDIO_CUT_SERVER_LATE_MS) {
             hints.add("- Server lateness above cut threshold (${uiState.serverLatenessMs}ms)")
         }
         if (hints.isEmpty()) {
