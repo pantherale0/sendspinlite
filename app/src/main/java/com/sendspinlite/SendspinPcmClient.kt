@@ -1093,12 +1093,9 @@ class SendspinPcmClient(
                         if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartDropTriggerAheadMs) {
                             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_CATCHUP
                             val targetAheadMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
-                            val dropped =
-                                if (snapshot.queuedChunks >= prestartBacklogChunkThreshold) {
-                                    jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
-                                } else {
-                                    jitter.dropWhileLate(nowUs(), restartKeepWithinUs)
-                                }
+                            // Always trim to the start window; lateness-based drop can leave
+                            // the head outside force-resync (-10..90ms).
+                            val dropped = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
                             if (dropped > 0) {
                                 val nowMs = System.currentTimeMillis()
                                 if (nowMs - lastRestartCatchupLogMs >= 1000L) {
@@ -1119,12 +1116,7 @@ class SendspinPcmClient(
                             // While recovering from audioserver death, drop stale audio more aggressively
                             // so we rejoin the live timeline quickly.
                             val targetAheadMs = resyncMinBufferMs
-                            val dropped =
-                                if (snap2.queuedChunks >= prestartBacklogChunkThreshold) {
-                                    jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
-                                } else {
-                                    jitter.dropWhileLate(nowUs(), restartKeepWithinUs)
-                                }
+                            val dropped = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
                             if (dropped > 0) {
                                 val nowMs = System.currentTimeMillis()
                                 if (nowMs - lastForceResyncLogMs >= 1000L) {
