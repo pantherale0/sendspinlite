@@ -37,20 +37,6 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: ./gradlew lintRelease --stacktrace
 
-      - name: Build release APK
-        env:
-          KEYSTORE_FILE: ${{ github.workspace }}/keystore.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          KEYSTORE_CONTENT: ${{ secrets.KEYSTORE_FILE }}
-        run: |
-          if [ -n "$KEYSTORE_CONTENT" ]; then
-            echo "$KEYSTORE_CONTENT" | base64 -d > keystore.jks
-          fi
-          ./gradlew assembleRelease --stacktrace
-
       - name: Upload release check reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -59,6 +45,5 @@ jobs:
           path: |
             app/build/reports/tests/
             app/build/reports/lint-results-release.html
-            app/build/outputs/apk/release/app-release.apk
           if-no-files-found: warn
           retention-days: 14
