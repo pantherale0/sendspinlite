@@ -133,8 +133,6 @@ class SendspinPcmClient(
     private var lastMessageReceivedMs: Long = 0L
 
     @Volatile
-    private var enableOpusCodec: Boolean = false
-
     private var opusDecoder: OpusDecoder? = null
 
     private var playAtServerUs: Long = Long.MIN_VALUE
@@ -250,11 +248,6 @@ class SendspinPcmClient(
         val clamped = ms.coerceIn(-100L, 100L)
         playoutOffsetAdjustmentUs = clamped * 1000L
         Log.i(tag, "playoutOffsetAdjustment=${clamped}ms (for multi-device sync tuning)")
-    }
-
-    fun setEnableOpusCodec(enabled: Boolean) {
-        enableOpusCodec = enabled
-        Log.i(tag, "enableOpusCodec=$enabled")
     }
 
     suspend fun connect() {
@@ -580,20 +573,17 @@ class SendspinPcmClient(
     private fun buildPlayerSupportObject(): JSONObject {
         val supportedFormats = JSONArray()
 
-        // Only include Opus if explicitly enabled by user
-        if (enableOpusCodec) {
-            supportedFormats
-                .put(
-                    JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 48000)
-                        .put("bit_depth", 16),
-                )
-                .put(
-                    JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 44100)
-                        .put("bit_depth", 16),
-                )
-        }
+        supportedFormats
+            .put(
+                JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 48000)
+                    .put("bit_depth", 16),
+            )
+            .put(
+                JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 44100)
+                    .put("bit_depth", 16),
+            )
 
-        // Always include PCM with supported bit depths (16, 24, 32)
+        // PCM with supported bit depths (16, 24, 32); server picks the stream format
         for (sampleRate in listOf(48000, 44100)) {
             for (bitDepth in listOf(16, 24, 32)) {
                 supportedFormats
