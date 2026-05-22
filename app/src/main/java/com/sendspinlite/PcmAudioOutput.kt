@@ -25,20 +25,25 @@ class PcmAudioOutput {
         private const val MAX_PIPELINE_LATENCY_US = 2_000_000L
         private const val SOFT_START_RAMP_MS = 35L
 
+        private const val BIT_DEPTH_16 = 16
+        private const val BIT_DEPTH_24 = 24
+        private const val BIT_DEPTH_32 = 32
+        private const val PROBE_SAMPLE_RATE_HZ = 48_000
+
         /** Bit depths we may advertise in client/hello; server must not exceed these. */
-        private val PCM_BIT_DEPTH_CANDIDATES = listOf(32, 24, 16)
+        private val PCM_BIT_DEPTH_CANDIDATES = listOf(BIT_DEPTH_32, BIT_DEPTH_24, BIT_DEPTH_16)
 
         private fun encodingFor(bitDepth: Int): Int =
             when (bitDepth) {
-                16 -> AudioFormat.ENCODING_PCM_16BIT
-                24 -> {
+                BIT_DEPTH_16 -> AudioFormat.ENCODING_PCM_16BIT
+                BIT_DEPTH_24 -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         AudioFormat.ENCODING_PCM_24BIT_PACKED
                     } else {
                         error("24-bit PCM playback requires API 31+")
                     }
                 }
-                32 -> {
+                BIT_DEPTH_32 -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         AudioFormat.ENCODING_PCM_32BIT
                     } else {
@@ -52,7 +57,7 @@ class PcmAudioOutput {
             try {
                 val encoding = encodingFor(bitDepth)
                 AudioTrack.getMinBufferSize(
-                    48_000,
+                    PROBE_SAMPLE_RATE_HZ,
                     AudioFormat.CHANNEL_OUT_STEREO,
                     encoding,
                 ) > 0
@@ -61,7 +66,7 @@ class PcmAudioOutput {
             }
 
         fun advertisedPcmBitDepths(): List<Int> =
-            PCM_BIT_DEPTH_CANDIDATES.filter { isPcmBitDepthSupported(it) }.ifEmpty { listOf(16) }
+            PCM_BIT_DEPTH_CANDIDATES.filter { isPcmBitDepthSupported(it) }.ifEmpty { listOf(BIT_DEPTH_16) }
     }
 
     @Volatile
