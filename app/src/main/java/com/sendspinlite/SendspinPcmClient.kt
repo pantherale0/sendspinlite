@@ -9,10 +9,10 @@ import android.os.Process
 import android.util.Log
 import kotlinx.coroutines.*
 import okhttp3.*
-import java.util.ArrayDeque
 import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -540,7 +540,7 @@ class SendspinPcmClient(
                     var iterations = 0
                     while (
                         iterations < OPUS_JIT_PREWARM_MAX_ITERATIONS &&
-                            (iterations < OPUS_JIT_WARMUP_MIN_ITERATIONS || lastDecodeUs > OPUS_WARM_DECODE_MAX_US)
+                        (iterations < OPUS_JIT_WARMUP_MIN_ITERATIONS || lastDecodeUs > OPUS_WARM_DECODE_MAX_US)
                     ) {
                         val t0 = nowUs()
                         decoder.decode(packet)
@@ -573,7 +573,7 @@ class SendspinPcmClient(
         var iterations = 0
         while (
             iterations < OPUS_STREAM_WARMUP_MAX_ITERATIONS &&
-                (iterations < OPUS_JIT_WARMUP_MIN_ITERATIONS || lastDecodeUs > OPUS_WARM_DECODE_MAX_US)
+            (iterations < OPUS_JIT_WARMUP_MIN_ITERATIONS || lastDecodeUs > OPUS_WARM_DECODE_MAX_US)
         ) {
             val packet =
                 synchronized(opusPendingLock) {
@@ -638,8 +638,7 @@ class SendspinPcmClient(
         }
     }
 
-    private fun hasPendingOpusFrames(): Boolean =
-        synchronized(opusPendingLock) { opusPending.isNotEmpty() }
+    private fun hasPendingOpusFrames(): Boolean = synchronized(opusPendingLock) { opusPending.isNotEmpty() }
 
     private fun ensureOpusDecodeThread() {
         if (opusDecodeThread?.isAlive == true) return
@@ -1399,11 +1398,11 @@ class SendspinPcmClient(
                             codec == "opus" &&
                                 (
                                     !isOpusDecoderWarm() ||
-                                    synchronized(opusPendingLock) { opusPending.isNotEmpty() } ||
-                                    (
-                                        isLowMemoryDevice &&
-                                            snapshot.queuedChunks < minBufferedPrefetchChunks
-                                    )
+                                        synchronized(opusPendingLock) { opusPending.isNotEmpty() } ||
+                                        (
+                                            isLowMemoryDevice &&
+                                                snapshot.queuedChunks < minBufferedPrefetchChunks
+                                        )
                                 )
                         if (
                             !skipOpusCatchupWhileWarming &&
@@ -1526,8 +1525,10 @@ class SendspinPcmClient(
 
                         val skipOpusLateRestartWhileWarming =
                             codec == "opus" &&
-                                (snapForStart.queuedChunks < prestartBacklogChunkThreshold ||
-                                    synchronized(opusPendingLock) { opusPending.isNotEmpty() })
+                                (
+                                    snapForStart.queuedChunks < prestartBacklogChunkThreshold ||
+                                        synchronized(opusPendingLock) { opusPending.isNotEmpty() }
+                                )
 
                         // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
                         // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
@@ -1568,11 +1569,11 @@ class SendspinPcmClient(
 
                         val canStartOpusWarmLowMem =
                             isLowMemoryDevice &&
-                            codec == "opus" &&
-                            isOpusDecoderWarm() &&
-                            snapForStart.queuedChunks >= minWarmStartQueued &&
-                            snapForStart.bufferAheadMs >= -warmStartMaxLateMs &&
-                            snapForStart.bufferAheadMs <= activeStartMaxMs + 50L
+                                codec == "opus" &&
+                                isOpusDecoderWarm() &&
+                                snapForStart.queuedChunks >= minWarmStartQueued &&
+                                snapForStart.bufferAheadMs >= -warmStartMaxLateMs &&
+                                snapForStart.bufferAheadMs <= activeStartMaxMs + 50L
 
                         val canStartScheduledPrefetch =
                             snapForStart.queuedChunks >= restartMinQueued &&

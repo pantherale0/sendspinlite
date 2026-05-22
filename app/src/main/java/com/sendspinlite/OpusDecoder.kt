@@ -1,10 +1,10 @@
 package com.sendspinlite
 
 import android.util.Log
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import io.github.jaredmdobson.concentus.OpusApplication
 import io.github.jaredmdobson.concentus.OpusEncoder
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import io.github.jaredmdobson.concentus.OpusDecoder as ConcentusDecoder
 
 /**
