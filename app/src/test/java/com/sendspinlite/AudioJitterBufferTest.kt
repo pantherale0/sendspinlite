@@ -13,14 +13,15 @@ class AudioJitterBufferTest {
     }
 
     @Test
-    fun offer_enforcesHardCapAndDropsOldestChunks() {
-        repeat(600) { index ->
+    fun offer_enforcesHardCapAndDropsFarthestFutureChunks() {
+        val cap = AudioJitterBuffer.DEFAULT_MAX_BUFFER_CHUNKS
+        repeat(cap + 100) { index ->
             buffer.offer(serverTsUs = index.toLong(), pcm = byteArrayOf(index.toByte()))
         }
 
         val snapshot = buffer.snapshot()
 
-        assertThat(snapshot.queuedChunks).isEqualTo(500)
+        assertThat(snapshot.queuedChunks).isEqualTo(cap)
         assertThat(snapshot.lateDrops).isEqualTo(100)
     }
 

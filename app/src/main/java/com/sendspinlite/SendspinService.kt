@@ -486,14 +486,13 @@ class SendspinService : Service() {
                 connected = true,
             )
 
-        // Load persisted static delay from SharedPreferences (needed when starting from boot
-        // since the ViewModel is not running to initialize _uiState with the saved value)
+        // Load persisted settings from SharedPreferences (needed when starting from boot
+        // since the ViewModel is not running to initialize _uiState with the saved values)
         val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
         val savedStaticDelayMs = prefs.getLong("static_delay_ms", 0L).coerceIn(0L, 5000L)
         if (savedStaticDelayMs != _uiState.value.staticDelayMs) {
             _uiState.value = _uiState.value.copy(staticDelayMs = savedStaticDelayMs)
         }
-
         client =
             SendspinPcmClient(
                 wsUrl = wsUrl,
@@ -655,11 +654,6 @@ class SendspinService : Service() {
         val clamped = ms.coerceIn(0L, 5000L)
         _uiState.value = _uiState.value.copy(staticDelayMs = clamped)
         client?.setStaticDelayMs(clamped)
-    }
-
-    fun setEnableOpusCodec(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(enableOpusCodec = enabled)
-        client?.setEnableOpusCodec(enabled)
     }
 
     // Player (local device) volume controls

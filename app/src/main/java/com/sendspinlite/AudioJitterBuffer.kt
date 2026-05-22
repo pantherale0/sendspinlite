@@ -4,6 +4,11 @@ import java.util.PriorityQueue
 import java.util.concurrent.atomic.AtomicLong
 
 class AudioJitterBuffer(private val clockSync: ClockSync) {
+    companion object {
+        /** Hard cap on queued PCM chunks (~30s at 48 kHz stereo). */
+        const val DEFAULT_MAX_BUFFER_CHUNKS = 1500
+    }
+
     data class Snapshot(
         val queuedChunks: Int,
         val bufferAheadMs: Long,
@@ -18,8 +23,9 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
 
     // Hard cap to prevent unbounded memory growth.
     // At 48kHz stereo 16-bit, each ~21ms chunk is ~4KB.
-    // 500 chunks ≈ 2MB max buffer, ~10 seconds of audio.
-    private val maxBufferChunks = 500
+    // 1500 chunks ≈ 6MB max buffer, ~30 seconds of audio — large enough to absorb
+    // Music Assistant's burst prefetch on stream start without dropping decoded audio.
+    private val maxBufferChunks = DEFAULT_MAX_BUFFER_CHUNKS
 
     private val q = PriorityQueue<Chunk>(compareBy { it.serverTimestampUs })
     private val lateDropsCounter = AtomicLong(0L)
@@ -38,7 +44,7 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
     fun trimTo(maxChunks: Int) {
         synchronized(q) {
             while (q.size > maxChunks) {
-                q.poll()
+                dropFarthestFutureChunkLocked()
             }
         }
     }
@@ -51,15 +57,24 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
     fun offer(
         serverTsUs: Long,
         pcm: ByteArray,
-    ) {
+    ): Int {
+        var dropped = 0
         synchronized(q) {
-            // Enforce hard cap: drop oldest chunks if buffer is full
+            // Enforce hard cap: drop the farthest-future chunk so the playout head (earliest
+            // timestamp) can advance toward server "now" during scheduled prefetch.
             while (q.size >= maxBufferChunks) {
-                q.poll()
-                lateDropsCounter.incrementAndGet()
+                dropFarthestFutureChunkLocked()
+                dropped++
             }
             q.add(Chunk(serverTsUs, pcm))
         }
+        return dropped
+    }
+
+    private fun dropFarthestFutureChunkLocked() {
+        val farthest = q.maxByOrNull { it.serverTimestampUs } ?: return
+        q.remove(farthest)
+        lateDropsCounter.incrementAndGet()
     }
 
     fun snapshot(): Snapshot {

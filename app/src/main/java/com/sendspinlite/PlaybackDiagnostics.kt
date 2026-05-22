@@ -19,6 +19,8 @@ object PlaybackDiagnostics {
     const val STATUS_WAITING_CLOCK = "waiting_clock_sync"
     const val STATUS_PRESTART_CATCHUP = "prestart_catchup"
     const val STATUS_PRESTART_BACKLOG_TRIM = "prestart_backlog_trim"
+    const val STATUS_PRESTART_SCHEDULED_WAIT = "prestart_scheduled_wait"
+    const val STATUS_PRESTART_PREFETCH_START = "prestart_prefetch_start"
     const val STATUS_FORCE_RESYNC_PRESTART = "force_resync_prestart"
     const val STATUS_START_BACKOFF = "start_backoff"
     const val STATUS_LATE_START_RECOVERY = "late_start_recovery"

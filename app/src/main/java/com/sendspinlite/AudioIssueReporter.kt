@@ -53,7 +53,6 @@ object AudioIssueReporter {
 
         // Audio configuration (no PII — codec choice, delay and speed are pipeline settings)
         sb.appendLine("=== AUDIO CONFIGURATION ===")
-        sb.appendLine("Codec             : ${if (uiState.enableOpusCodec) "Opus" else "PCM"}")
         sb.appendLine("Static Delay      : ${uiState.staticDelayMs} ms")
         sb.appendLine("Playback Speed    : ${"%.3f".format(uiState.playbackSpeedMultiplier)}x")
         sb.appendLine("Low Memory Device : ${uiState.isLowMemoryDevice}")
