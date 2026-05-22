@@ -3,9 +3,13 @@ package com.sendspinlite
 import android.app.ActivityManager
 import android.content.Context
 import android.net.ConnectivityManager
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Process
 import android.util.Log
 import kotlinx.coroutines.*
 import okhttp3.*
+import java.util.ArrayDeque
 import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
@@ -32,11 +36,21 @@ class SendspinPcmClient(
         private const val RTT_AUDIO_CUT_INFLATE_DIVISOR = 2000L
         private const val RTT_AUDIO_CUT_INFLATE_MAX_MS = 500L
 
+        /** Compressed bytes the server may buffer ahead (limits startup burst). */
+        private const val CLIENT_BUFFER_CAPACITY_BYTES = 96_000
+
+        /** Pending Opus frames awaiting decode; drop oldest when full to stay near live edge. */
+        private const val MAX_OPUS_PENDING_FRAMES = 2400
+
         // Shared OkHttpClient to avoid leaking thread pools and connection pools on reconnect
         private val sharedOkHttp =
             OkHttpClient.Builder()
                 .pingInterval(30, TimeUnit.SECONDS)
                 .build()
+
+        /** Process-wide Concentus JIT warmup — cold JVM first decode is ~3s without this. */
+        private val opusJitPrewarmInFlight = AtomicBoolean(false)
+        private val opusJitPrewarmComplete = AtomicBoolean(false)
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -135,6 +149,14 @@ class SendspinPcmClient(
     @Volatile
     private var opusDecoder: OpusDecoder? = null
 
+    private var opusDecodeThread: HandlerThread? = null
+    private var opusDecodeHandler: Handler? = null
+    private val opusPending = ArrayDeque<Pair<Long, ByteArray>>()
+    private val opusPendingLock = Any()
+    private var opusDecodeErrorLogs = 0
+    private var prestartLateRestartLoops = 0
+    private var prestartFarAheadSinceMs = 0L
+
     private var playAtServerUs: Long = Long.MIN_VALUE
 
     private val warmupInProgress = AtomicBoolean(false)
@@ -162,6 +184,7 @@ class SendspinPcmClient(
     private var decodeLatencyUs: Long = 0L // Running average of decode time
     private val decodeLatencySamples = ArrayDeque<Long>(30)
     private val maxDecodeLatencySamples = 30 // Keep rolling average of last 30 frames
+    private var opusWarmupDone: Boolean = false
 
     // Track last sent error state to prevent spam
     private var lastErrorStateSent: Long = 0L
@@ -324,6 +347,7 @@ class SendspinPcmClient(
                         isConnected.set(true)
                         handshakeComplete = false
                         lastMessageReceivedMs = System.currentTimeMillis()
+                        prewarmOpusJitInBackground()
                         onUiUpdate { it.copy(status = "ws_open", connected = true) }
                         sendClientHello()
                     }
@@ -385,6 +409,8 @@ class SendspinPcmClient(
         speedAdjustmentJob = null
         watchdogJob?.cancel()
         watchdogJob = null
+
+        stopOpusDecodeThread()
 
         // Stop audio output - this prevents buffered data from continuing to play
         output.stop()
@@ -477,6 +503,165 @@ class SendspinPcmClient(
         decodeLatencyUs = decodeLatencySamples.average().toLong()
     }
 
+    private fun isOpusDecoderWarm(): Boolean {
+        if (decodeLatencySamples.size < 3) return false
+        return decodeLatencySamples.toList().takeLast(3).all { sample -> sample in 1..20_000L }
+    }
+
+    /** JIT-compile Concentus on a background thread so first playback decode is fast. */
+    private fun prewarmOpusJitInBackground() {
+        if (!opusJitPrewarmInFlight.compareAndSet(false, true)) return
+        Thread(
+            {
+                try {
+                    val packet = OpusDecoder.createWarmupPacket(48_000, 2)
+                    val decoder = OpusDecoder(48_000, 2)
+                    val warmupStart = nowUs()
+                    var lastDecodeUs = 0L
+                    var iterations = 0
+                    while (iterations < 24 && (iterations < 4 || lastDecodeUs > 20_000L)) {
+                        val t0 = nowUs()
+                        decoder.decode(packet)
+                        lastDecodeUs = nowUs() - t0
+                        iterations++
+                    }
+                    opusJitPrewarmComplete.set(true)
+                    Log.i(
+                        tag,
+                        "Opus JIT prewarm at connect: lastDecodeUs=$lastDecodeUs " +
+                            "totalUs=${nowUs() - warmupStart}",
+                    )
+                } catch (e: Exception) {
+                    opusJitPrewarmInFlight.set(false)
+                    Log.w(tag, "Opus JIT prewarm at connect failed", e)
+                }
+            },
+            "OpusJitPrewarm",
+        ).apply {
+            priority = Process.THREAD_PRIORITY_BACKGROUND
+            start()
+        }
+    }
+
+    /** JIT-compile Concentus on the live decoder using the head ingress packet (never synthetic). */
+    private fun warmupOpusDecoderFromPending() {
+        val decoder = opusDecoder ?: return
+        if (isOpusDecoderWarm()) return
+        val warmupStart = nowUs()
+        var lastDecodeUs = 0L
+        var iterations = 0
+        while (iterations < 32 && (iterations < 4 || lastDecodeUs > 20_000L)) {
+            val packet =
+                synchronized(opusPendingLock) {
+                    opusPending.peekFirst()?.second
+                } ?: return
+            val t0 = nowUs()
+            decoder.decode(packet)
+            lastDecodeUs = nowUs() - t0
+            recordDecodeLatency(lastDecodeUs)
+            iterations++
+        }
+    }
+
+    private fun ensureOpusDecodeThread() {
+        if (opusDecodeThread?.isAlive == true) return
+        val thread =
+            HandlerThread("OpusDecode", Process.THREAD_PRIORITY_AUDIO).apply {
+                start()
+            }
+        opusDecodeThread = thread
+        opusDecodeHandler = Handler(thread.looper)
+    }
+
+    private fun stopOpusDecodeThread() {
+        synchronized(opusPendingLock) { opusPending.clear() }
+        opusDecodeHandler = null
+        opusDecodeThread?.quitSafely()
+        opusDecodeThread = null
+    }
+
+    private val opusDrainRunnable =
+        Runnable {
+            drainOpusPendingQueue()
+        }
+
+    private fun enqueueOpusChunk(
+        serverTsUs: Long,
+        encoded: ByteArray,
+    ) {
+        if (streamEnded) return
+        ensureOpusDecodeThread()
+        synchronized(opusPendingLock) {
+            while (opusPending.size >= MAX_OPUS_PENDING_FRAMES) {
+                opusPending.removeFirst()
+            }
+            opusPending.addLast(serverTsUs to encoded)
+        }
+        opusDecodeHandler?.removeCallbacks(opusDrainRunnable)
+        opusDecodeHandler?.post(opusDrainRunnable)
+    }
+
+    private fun drainOpusPendingQueue() {
+        if (streamEnded) return
+        if (!isOpusDecoderWarm()) {
+            val hasPacket = synchronized(opusPendingLock) { opusPending.isNotEmpty() }
+            if (!hasPacket) return
+            warmupOpusDecoderFromPending()
+            if (!isOpusDecoderWarm()) return
+        }
+        val batchBudgetUs =
+            synchronized(opusPendingLock) {
+                when {
+                    !isOpusDecoderWarm() -> 2_000_000L
+                    opusPending.size > 200 -> 100_000L
+                    else -> 25_000L
+                }
+            }
+        val batchStartUs = nowUs()
+        while (nowUs() - batchStartUs < batchBudgetUs) {
+            if (streamEnded) return
+            val decoderWarm = isOpusDecoderWarm()
+            val pendingStaleDropUs = if (decoderWarm) 150_000L else Long.MAX_VALUE
+            val postDecodeStaleDropUs = 150_000L
+            val item =
+                synchronized(opusPendingLock) {
+                    val nowServerUs = clock.convertClientToServer(nowUs())
+                    while (opusPending.size > 1) {
+                        val head = opusPending.peekFirst() ?: break
+                        if (nowServerUs - head.first > pendingStaleDropUs) {
+                            opusPending.removeFirst()
+                        } else {
+                            break
+                        }
+                    }
+                    if (opusPending.isEmpty()) return
+                    opusPending.removeFirst()
+                }
+            val decoder = opusDecoder ?: continue
+            val decodeStart = nowUs()
+            val pcm = decoder.decode(item.second)
+            recordDecodeLatency(nowUs() - decodeStart)
+            if (pcm.isNotEmpty() && !streamEnded) {
+                val nowServerUs = clock.convertClientToServer(nowUs())
+                if (decoderWarm && nowServerUs - item.first > postDecodeStaleDropUs) {
+                    synchronized(opusPendingLock) {
+                        if (opusPending.isEmpty()) return
+                    }
+                    continue
+                }
+                jitter.offer(item.first, pcm)
+            } else {
+                if (opusDecodeErrorLogs < 8) {
+                    opusDecodeErrorLogs++
+                    Log.w(tag, "Opus decode empty (${item.second.size} bytes) ts=${item.first}")
+                }
+            }
+            synchronized(opusPendingLock) {
+                if (opusPending.isEmpty()) return
+            }
+        }
+    }
+
     private fun recordRecoveryEvent(
         event: String,
         details: String,
@@ -516,9 +701,14 @@ class SendspinPcmClient(
         if (serverLatenessMs != null) {
             lastPublishedServerLatenessMs = serverLatenessMs
         }
+        if (output.isStarted()) {
+            output.getEstimatedPipelineLatencyUs()
+        }
+        val smoothedLatencyMs = output.getSmoothedLatencyMs()
         throttledUiUpdate {
             it.copy(
                 audioOutputStarted = output.isStarted(),
+                smoothedLatencyMs = smoothedLatencyMs,
                 playbackRecoveryStatus = recoveryStatus,
                 lastRecoveryEvent = lastRecoveryEvent,
                 clockReadyForPlayback = clockReady,
@@ -573,17 +763,7 @@ class SendspinPcmClient(
     private fun buildPlayerSupportObject(): JSONObject {
         val supportedFormats = JSONArray()
 
-        supportedFormats
-            .put(
-                JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 48000)
-                    .put("bit_depth", 16),
-            )
-            .put(
-                JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 44100)
-                    .put("bit_depth", 16),
-            )
-
-        // PCM with supported bit depths (16, 24, 32); server picks the stream format
+        // PCM first (preferred on constrained devices); Opus offered as alternative.
         for (sampleRate in listOf(48000, 44100)) {
             for (bitDepth in listOf(16, 24, 32)) {
                 supportedFormats
@@ -594,11 +774,21 @@ class SendspinPcmClient(
             }
         }
 
+        supportedFormats
+            .put(
+                JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 48000)
+                    .put("bit_depth", 16),
+            )
+            .put(
+                JSONObject().put("codec", "opus").put("channels", 2).put("sample_rate", 44100)
+                    .put("bit_depth", 16),
+            )
+
         val supportedCommands = JSONArray().put("volume").put("mute")
 
         return JSONObject()
             .put("supported_formats", supportedFormats)
-            .put("buffer_capacity", 2_000_000)
+            .put("buffer_capacity", CLIENT_BUFFER_CAPACITY_BYTES)
             .put("supported_commands", supportedCommands)
     }
 
@@ -758,13 +948,16 @@ class SendspinPcmClient(
                         recoveryStatus = playbackRecoveryStatus,
                         clockReady = isClockReadyForPlayback(),
                     )
-                    throttledUiUpdate {
+                    // Connection stats bypass playout diagnostics throttle (playout hammers throttledUiUpdate).
+                    val networkQuality = clock.getNetworkConditionQuality().toString()
+                    val stability = clock.getClockStability().toString()
+                    val connectionType = getConnectionType()
+                    onUiUpdate {
                         it.copy(
-                            networkQuality = clock.getNetworkConditionQuality().toString(),
-                            stability = clock.getClockStability().toString(),
-                            connectionType = getConnectionType(),
+                            networkQuality = networkQuality,
+                            stability = stability,
+                            connectionType = connectionType,
                             playbackSpeedMultiplier = output.getCurrentPlaybackSpeed(),
-                            smoothedLatencyMs = output.getSmoothedLatencyMs(),
                         )
                     }
 
@@ -989,10 +1182,27 @@ class SendspinPcmClient(
         )
     }
 
+    private fun touchPlaybackHeartbeat() {
+        lastPlaybackHeartbeatMs = System.currentTimeMillis()
+    }
+
+    /** Long playout sleeps must not trip the 10s health watchdog. */
+    private suspend fun delayKeepingPlaybackAlive(durationMs: Long) {
+        if (durationMs <= 0L) return
+        val stepMs = 500L
+        var remaining = durationMs
+        while (remaining > 0) {
+            val slice = minOf(stepMs, remaining)
+            delay(slice)
+            touchPlaybackHeartbeat()
+            remaining -= slice
+        }
+    }
+
     private fun startPlayoutLoop() {
         playoutJob?.cancel()
         playoutJob =
-            scope.launch {
+            scope.launch(Dispatchers.Default) {
                 val minBufferMs = -20L // allow modestly late starts; catch-up logic will recover
                 val maxStartAheadMs = 150L // Increased from 120ms to allow more buffer accumulation before starting
                 val resyncMinBufferMs = -10L
@@ -1013,16 +1223,34 @@ class SendspinPcmClient(
                     4 // allow recovery to begin sooner on constrained devices
                 val forceStartAfterLoops = 80 // ~0.8s with 10ms retry delay
                 val prestartBacklogChunkThreshold = 60 // trim aggressively when prestart queue grows
+                // Music Assistant may schedule audio far in the future; wait in prestart (with
+                // heartbeat) until server time catches up instead of blocking playout for tens of seconds.
+                val maxScheduledPrefetchAheadMs = 120_000L
+                val scheduledPrefetchMaxWaitMs = 30_000L
+                val minBufferedPrefetchChunks = 40
+                val minWarmStartQueued = 12
+                val warmStartMaxLateMs = 400L
 
-                var lateRestartLoops = 0
                 var restartBackoffMs = 200L
                 var nextStartAttemptUs = 0L
 
                 while (isActive && isConnected.get()) {
+                    if (streamEnded && !output.isStarted()) {
+                        if (playbackRecoveryStatus != PlaybackDiagnostics.STATUS_IDLE) {
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_IDLE
+                        }
+                        publishPlaybackDiagnostics(
+                            snapshot = jitter.snapshot(),
+                            recoveryStatus = PlaybackDiagnostics.STATUS_IDLE,
+                            clockReady = isClockReadyForPlayback(),
+                        )
+                        delay(50)
+                        continue
+                    }
+
                     val snapshot = jitter.snapshot()
 
-                    // Signal that playback loop is alive
-                    lastPlaybackHeartbeatMs = System.currentTimeMillis()
+                    touchPlaybackHeartbeat()
 
                     if (!output.isStarted()) {
                         val nowLocalUs = nowUs()
@@ -1032,7 +1260,7 @@ class SendspinPcmClient(
                                 snapshot = snapshot,
                                 recoveryStatus = PlaybackDiagnostics.STATUS_START_BACKOFF,
                                 clockReady = isClockReadyForPlayback(),
-                                lateRestartLoops = lateRestartLoops,
+                                lateRestartLoops = prestartLateRestartLoops,
                             )
                             delay(waitMs)
                             continue
@@ -1072,14 +1300,28 @@ class SendspinPcmClient(
                                 snapshot = jitter.snapshot(),
                                 recoveryStatus = PlaybackDiagnostics.STATUS_WAITING_CLOCK,
                                 clockReady = false,
-                                lateRestartLoops = lateRestartLoops,
+                                lateRestartLoops = prestartLateRestartLoops,
                             )
                             delay(50)
                             continue
                         }
 
-                        // Prevent deadlock when head is late (negative ahead) by dropping late chunks now.
-                        if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < restartDropTriggerAheadMs) {
+                        // Skip catchup while Opus JIT is compiling or the prestart buffer is still building.
+                        val skipOpusCatchupWhileWarming =
+                            codec == "opus" &&
+                                (
+                                    !isOpusDecoderWarm() ||
+                                    synchronized(opusPendingLock) { opusPending.isNotEmpty() } ||
+                                    (
+                                        isLowMemoryDevice &&
+                                            snapshot.queuedChunks < minBufferedPrefetchChunks
+                                    )
+                                )
+                        if (
+                            !skipOpusCatchupWhileWarming &&
+                            snapshot.queuedChunks > 0 &&
+                            snapshot.bufferAheadMs < restartDropTriggerAheadMs
+                        ) {
                             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_CATCHUP
                             val targetAheadMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
                             // Always trim to the start window; lateness-based drop can leave
@@ -1135,7 +1377,7 @@ class SendspinPcmClient(
                             }
                         }
 
-                        val snapForStart = jitter.snapshot()
+                        var snapForStart = jitter.snapshot()
 
                         // Calculate effective buffer ahead accounting for playout offset
                         // Chunks will actually be needed playoutOffsetUs in the future (negative offset = sooner)
@@ -1150,37 +1392,176 @@ class SendspinPcmClient(
                         val activeStartMaxMs =
                             if (inDiscontinuityMode) discontinuityStartMaxMs else startMaxMs
 
+                        if (snapForStart.bufferAheadMs <= activeStartMaxMs) {
+                            prestartFarAheadSinceMs = 0L
+                        }
+
+                        val nowMsPrestart = System.currentTimeMillis()
+                        val scheduledPrefetchWaitedMs =
+                            if (prestartFarAheadSinceMs > 0L) {
+                                nowMsPrestart - prestartFarAheadSinceMs
+                            } else {
+                                0L
+                            }
+                        val scheduledPrefetchTimedOut =
+                            prestartFarAheadSinceMs > 0L &&
+                                scheduledPrefetchWaitedMs >= scheduledPrefetchMaxWaitMs
+
+                        // Low-memory fast start: when enough decoded chunks have buffered to ride out
+                        // the prefetch lead, do not wait for the server clock — pull the schedule forward.
+                        val bufferedPrefetchReady =
+                            isLowMemoryDevice &&
+                            codec == "opus" &&
+                            snapForStart.queuedChunks >= minBufferedPrefetchChunks &&
+                            snapForStart.bufferAheadMs > activeStartMaxMs &&
+                            snapForStart.bufferAheadMs <= maxScheduledPrefetchAheadMs
+
+                        // While Opus is still cold or prefetch buffer is building, keep decoding instead
+                        // of waiting for the server clock to catch a far-future schedule head.
+                        val deferScheduledWaitForOpusWarmup =
+                            isLowMemoryDevice &&
+                            codec == "opus" &&
+                            (
+                                snapForStart.queuedChunks < minBufferedPrefetchChunks ||
+                                    !isOpusDecoderWarm() ||
+                                    synchronized(opusPendingLock) { opusPending.isNotEmpty() }
+                            )
+
+                        // Scheduled prefetch: keep decoding while server clock catches the head timestamp.
+                        if (
+                            !bufferedPrefetchReady &&
+                            !deferScheduledWaitForOpusWarmup &&
+                            snapForStart.queuedChunks >= restartMinQueued &&
+                            snapForStart.bufferAheadMs > activeStartMaxMs &&
+                            snapForStart.bufferAheadMs <= maxScheduledPrefetchAheadMs &&
+                            !scheduledPrefetchTimedOut
+                        ) {
+                            if (prestartFarAheadSinceMs == 0L) {
+                                prestartFarAheadSinceMs = nowMsPrestart
+                            }
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_SCHEDULED_WAIT
+                            publishPlaybackDiagnostics(
+                                snapshot = snapForStart,
+                                recoveryStatus = playbackRecoveryStatus,
+                                clockReady = clockReadyForPlayback,
+                                lateRestartLoops = prestartLateRestartLoops,
+                            )
+                            delay(50)
+                            continue
+                        }
+
                         // Start window is based on raw ahead; effective offset is handled in scheduling.
                         val canStartNormally =
                             snapForStart.queuedChunks >= restartMinQueued &&
                                 snapForStart.bufferAheadMs in activeStartMinMs..activeStartMaxMs
 
+                        val skipOpusLateRestartWhileWarming =
+                            codec == "opus" &&
+                                (snapForStart.queuedChunks < prestartBacklogChunkThreshold ||
+                                    synchronized(opusPendingLock) { opusPending.isNotEmpty() })
+
                         // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
                         // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
-                        if (!canStartNormally && snapForStart.queuedChunks >= restartMinQueued && snapForStart.bufferAheadMs < restartMinAheadMs) {
-                            lateRestartLoops++
+                        if (
+                            !skipOpusLateRestartWhileWarming &&
+                            !canStartNormally &&
+                            snapForStart.queuedChunks >= restartMinQueued &&
+                            snapForStart.bufferAheadMs < restartMinAheadMs
+                        ) {
+                            prestartLateRestartLoops++
                         } else if (canStartNormally) {
                             // Do not reset the counter when ahead oscillates around restartMinAheadMs
                             // while still outside the normal start window — that prevented force-late-start.
-                            lateRestartLoops = 0
+                            prestartLateRestartLoops = 0
                         }
 
                         // If we remain late for a while, allow bounded late-start recovery instead of
                         // endless prestart dropping (which can deadlock playback on constrained devices).
                         val canStartLateRecovery =
-                            lateRestartLoops >= 20 && snapForStart.bufferAheadMs >= -50L
+                            prestartLateRestartLoops >= 20 &&
+                                snapForStart.queuedChunks >= restartMinQueued &&
+                                snapForStart.bufferAheadMs >= -50L
 
                         val forceLateStart =
-                            lateRestartLoops >= forceStartAfterLoops && snapForStart.bufferAheadMs >= -40L
-                        val canStart = canStartNormally || canStartLateRecovery || forceLateStart
+                            prestartLateRestartLoops >= forceStartAfterLoops &&
+                                snapForStart.queuedChunks >= restartMinQueued &&
+                                snapForStart.bufferAheadMs >= -40L
+
+                        val canStartBufferedPrefetch =
+                            isLowMemoryDevice &&
+                            codec == "opus" &&
+                            snapForStart.queuedChunks >= minBufferedPrefetchChunks &&
+                            snapForStart.bufferAheadMs > activeStartMaxMs &&
+                            snapForStart.bufferAheadMs <= maxScheduledPrefetchAheadMs
+
+                        val canStartOpusWarmLowMem =
+                            isLowMemoryDevice &&
+                            codec == "opus" &&
+                            isOpusDecoderWarm() &&
+                            snapForStart.queuedChunks >= minWarmStartQueued &&
+                            snapForStart.bufferAheadMs >= -warmStartMaxLateMs &&
+                            snapForStart.bufferAheadMs <= activeStartMaxMs + 50L
+
+                        val canStartScheduledPrefetch =
+                            snapForStart.queuedChunks >= restartMinQueued &&
+                                snapForStart.bufferAheadMs > activeStartMaxMs &&
+                                snapForStart.bufferAheadMs <= maxScheduledPrefetchAheadMs &&
+                                scheduledPrefetchTimedOut &&
+                                !canStartBufferedPrefetch
+
+                        val canStart =
+                            canStartNormally ||
+                                canStartLateRecovery ||
+                                forceLateStart ||
+                                canStartOpusWarmLowMem ||
+                                canStartBufferedPrefetch ||
+                                canStartScheduledPrefetch
+
+                        if (streamEnded) {
+                            delay(50)
+                            continue
+                        }
 
                         if (canStart) {
-                            if ((forceLateStart || canStartLateRecovery) && !canStartNormally) {
+                            prestartFarAheadSinceMs = 0L
+                            if (canStartOpusWarmLowMem && !canStartNormally) {
+                                val pullForwardUs =
+                                    if (snapForStart.bufferAheadMs < 0L) {
+                                        (-snapForStart.bufferAheadMs + 50L) * 1000L
+                                    } else {
+                                        0L
+                                    }
+                                playoutOffsetAdjustmentUs = -pullForwardUs
+                                playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START
+                                recordRecoveryEvent(
+                                    PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START,
+                                    "mode=warm_lowmem ahead=${snapForStart.bufferAheadMs}ms " +
+                                        "pullForwardMs=${pullForwardUs / 1000} queued=${snapForStart.queuedChunks} " +
+                                        "decodeAvgUs=$decodeLatencyUs",
+                                )
+                            } else if (canStartBufferedPrefetch && !canStartNormally) {
+                                val pullForwardUs =
+                                    ((snapForStart.bufferAheadMs - activeStartMaxMs).coerceAtLeast(0L)) * 1000L
+                                playoutOffsetAdjustmentUs = -pullForwardUs
+                                playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START
+                                recordRecoveryEvent(
+                                    PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START,
+                                    "mode=lowmem_pull_forward ahead=${snapForStart.bufferAheadMs}ms " +
+                                        "pullForwardMs=${pullForwardUs / 1000} queued=${snapForStart.queuedChunks}",
+                                )
+                            } else if (canStartScheduledPrefetch && !canStartNormally) {
+                                playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START
+                                recordRecoveryEvent(
+                                    PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START,
+                                    "mode=scheduled_timeout ahead=${snapForStart.bufferAheadMs}ms " +
+                                        "queued=${snapForStart.queuedChunks} waitedMs=$scheduledPrefetchWaitedMs",
+                                )
+                            } else if ((forceLateStart || canStartLateRecovery) && !canStartNormally) {
                                 playbackRecoveryStatus = PlaybackDiagnostics.STATUS_LATE_START_RECOVERY
                                 recordRecoveryEvent(
                                     PlaybackDiagnostics.STATUS_LATE_START_RECOVERY,
                                     "ahead=${snapForStart.bufferAheadMs}ms effective=$effectiveBufferAheadMs ms " +
-                                        "queued=${snapForStart.queuedChunks} loops=$lateRestartLoops",
+                                        "queued=${snapForStart.queuedChunks} loops=$prestartLateRestartLoops",
                                 )
                                 // If we're more than 100ms behind on forced late-start, trigger resync to snap to live
                                 // instead of waiting for slow catch-up via playback speed adjustment
@@ -1205,21 +1586,8 @@ class SendspinPcmClient(
                                 inDiscontinuityMode = false
                             }
 
-                            // Initialize Opus decoder if needed
-                            if (codec == "opus") {
-                                opusDecoder =
-                                    try {
-                                        OpusDecoder(sampleRate, channels)
-                                    } catch (e: Exception) {
-                                        Log.e(tag, "Failed to create Opus decoder", e)
-                                        sendClientStateError()
-                                        delay(100)
-                                        continue
-                                    }
-                            }
-
                             sendClientStateSynchronized()
-                            lateRestartLoops = 0
+                            prestartLateRestartLoops = 0
                             restartBackoffMs = 200L
                             nextStartAttemptUs = 0L
                             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PLAYING
@@ -1238,7 +1606,7 @@ class SendspinPcmClient(
                                 snapshot = snapForStart,
                                 recoveryStatus = playbackRecoveryStatus,
                                 clockReady = clockReadyForPlayback,
-                                lateRestartLoops = lateRestartLoops,
+                                lateRestartLoops = prestartLateRestartLoops,
                             )
                             delay(10)
                             continue
@@ -1247,7 +1615,7 @@ class SendspinPcmClient(
 
                     val chunk = jitter.pollPlayable(nowUs(), lateDropUs)
                     if (chunk == null) {
-                        if (jitter.isEmpty()) {
+                        if (jitter.isEmpty() && !streamEnded) {
                             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_UNDERRUN
                         }
                         publishPlaybackDiagnostics(
@@ -1260,19 +1628,8 @@ class SendspinPcmClient(
                         continue
                     }
 
-                    // Decode if Opus, measuring latency
-                    val pcmData =
-                        if (codec == "opus") {
-                            val decodeStart = nowUs()
-                            val decoded = opusDecoder?.decode(chunk.pcmData) ?: ByteArray(0)
-                            recordDecodeLatency(nowUs() - decodeStart)
-                            decoded
-                        } else {
-                            chunk.pcmData
-                        }
-
+                    val pcmData = chunk.pcmData
                     if (pcmData.isEmpty()) {
-                        Log.w(tag, "Empty PCM data after decode")
                         continue
                     }
 
@@ -1303,7 +1660,8 @@ class SendspinPcmClient(
                             else -> sinceOutputStartUs.toDouble() / startupPlayoutOffsetRampUs.toDouble()
                         }
                     val rampedBasePlayoutOffsetUs = (playoutOffsetUs.toDouble() * startupRampFactor).toLong()
-                    val totalPlayoutOffsetUs = rampedBasePlayoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
+                    // Decode runs before jitter (ingress path); only pipeline offset applies at playout.
+                    val totalPlayoutOffsetUs = rampedBasePlayoutOffsetUs + playoutOffsetAdjustmentUs - staticDelayUs
 
                     // Convert server timestamp to client time using Kalman filter offset (same client "now" as earlyUs)
                     val localPlayUs =
@@ -1362,8 +1720,13 @@ class SendspinPcmClient(
                     val nowMs = System.currentTimeMillis()
                     val timeSinceLastCutMs = nowMs - lastAudioCutMs
                     val startupCutGraceActive = sinceOutputStartUs < startupCutGraceUs
+                    val opusStartupGraceActive = codec == "opus" && sinceOutputStartUs < 4_000_000L
                     val effectiveOutOfSyncThresholdMs =
-                        if (startupCutGraceActive) (audioOutOfSyncThresholdMs + 120L) else audioOutOfSyncThresholdMs
+                        when {
+                            opusStartupGraceActive -> audioOutOfSyncThresholdMs + 500L
+                            startupCutGraceActive -> audioOutOfSyncThresholdMs + 120L
+                            else -> audioOutOfSyncThresholdMs
+                        }
                     val rttInflatedThresholdMs =
                         if (clock.getAverageRttUs() > MAX_RTT_FOR_START_US) {
                             effectiveOutOfSyncThresholdMs +
@@ -1408,18 +1771,8 @@ class SendspinPcmClient(
                         val targetLateThresholdMs = targetLateUs / 1000L
                         while (dropped < maxDrops) {
                             val next = jitter.pollPlayable(nowUs(), Long.MAX_VALUE) ?: break
-                            val nextPcm =
-                                if (codec == "opus") {
-                                    val decodeStart = nowUs()
-                                    val decoded = opusDecoder?.decode(next.pcmData) ?: ByteArray(0)
-                                    recordDecodeLatency(nowUs() - decodeStart)
-                                    decoded
-                                } else {
-                                    next.pcmData
-                                }
-
-                            // Apply same decode latency compensation during catch-up as during normal playback
-                            val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs
+                            val nextPcm = next.pcmData
+                            val nextTotalPlayoutOffsetUs = playoutOffsetUs + playoutOffsetAdjustmentUs - staticDelayUs
                             val scheduleNowUs = nowUs()
                             val nextLocalPlayUs =
                                 clock.convertServerToClient(next.serverTimestampUs, scheduleNowUs) +
@@ -1477,11 +1830,20 @@ class SendspinPcmClient(
                     // This ensures data reaches the speaker at the correct moment regardless of buffer depth.
                     val pipelineLatencyUs = output.getEstimatedPipelineLatencyUs()
                     if (earlyUs > pipelineLatencyUs) {
-                        delay((earlyUs - pipelineLatencyUs) / 1000)
+                        delayKeepingPlaybackAlive((earlyUs - pipelineLatencyUs) / 1000)
+                    }
+
+                    if (streamEnded) {
+                        delay(10)
+                        continue
                     }
 
                     val ok = output.writePcm(pcmData)
                     if (!ok) {
+                        if (streamEnded) {
+                            delay(10)
+                            continue
+                        }
                         Log.w(tag, "PCM write failed; restarting output")
                         output.stop()
                         outputStartedAtUs = 0L
@@ -1562,10 +1924,11 @@ class SendspinPcmClient(
 
                 "stream/start" -> {
                     streamEnded = false // Reset flag when new stream starts
+                    prestartLateRestartLoops = 0
+                    prestartFarAheadSinceMs = 0L
+                    opusWarmupDone = false
                     lastChunkServerTimestampUs = Long.MIN_VALUE // Reset discontinuity detector
                     inDiscontinuityMode = false
-                    decodeLatencyUs = 0L
-                    decodeLatencySamples.clear()
                     audioScheduleDebugCount = 0
                     playoutOffsetUs = -50_000L // Reset to default on new stream
                     playoutOffsetAdjustmentUs = 0L // Clear any accumulated adjustment too
@@ -1573,10 +1936,41 @@ class SendspinPcmClient(
 
                     val player = payload.optJSONObject("player")
                     if (player != null) {
+                        stopOpusDecodeThread()
+                        opusDecodeErrorLogs = 0
                         codec = player.optString("codec", codec)
-                        sampleRate = player.optInt("sample_rate", sampleRate)
-                        channels = player.optInt("channels", channels)
+                        val streamSampleRate = player.optInt("sample_rate", sampleRate)
+                        val streamChannels = player.optInt("channels", channels)
                         bitDepth = player.optInt("bit_depth", bitDepth)
+                        if (codec == "opus") {
+                            // Decoder output is always 16-bit PCM; AudioTrack must match.
+                            bitDepth = 16
+                            try {
+                                val existing = opusDecoder
+                                val reusingDecoder =
+                                    existing != null &&
+                                        existing.sampleRate == streamSampleRate &&
+                                        existing.channels == streamChannels
+                                if (reusingDecoder) {
+                                    existing.reset()
+                                } else {
+                                    opusDecoder = OpusDecoder(streamSampleRate, streamChannels)
+                                    decodeLatencyUs = 0L
+                                    decodeLatencySamples.clear()
+                                }
+                                sampleRate = streamSampleRate
+                                channels = streamChannels
+                                opusWarmupDone = true
+                                ensureOpusDecodeThread()
+                                opusDecodeHandler?.post { drainOpusPendingQueue() }
+                            } catch (e: Exception) {
+                                Log.e(tag, "Failed to create Opus decoder", e)
+                                opusDecoder = null
+                                sendClientStateError()
+                            }
+                        } else {
+                            opusDecoder = null
+                        }
                         playAtServerUs =
                             if (player.has("play_at")) {
                                 player.optLong(
@@ -1598,7 +1992,6 @@ class SendspinPcmClient(
                         output.pause()
 
                         jitter.clear()
-                        opusDecoder = null
                     }
                 }
 
@@ -1609,13 +2002,29 @@ class SendspinPcmClient(
 
                 "stream/end" -> {
                     streamEnded = true
+                    prestartLateRestartLoops = 0
+                    prestartFarAheadSinceMs = 0L
+                    playbackRecoveryStatus = PlaybackDiagnostics.STATUS_IDLE
+                    lastRecoveryEvent = ""
+                    stopOpusDecodeThread()
                     // Pause instead of stop to allow reuse
                     output.pause()
                     outputStartedAtUs = 0L
                     jitter.clear()
                     opusDecoder = null
                     playAtServerUs = Long.MIN_VALUE
-                    onUiUpdate { it.copy(status = "stream/end", streamDesc = "") }
+                    publishPlaybackDiagnostics(
+                        snapshot = jitter.snapshot(),
+                        recoveryStatus = PlaybackDiagnostics.STATUS_IDLE,
+                        clockReady = isClockReadyForPlayback(),
+                    )
+                    onUiUpdate {
+                        it.copy(
+                            status = "stream/end",
+                            streamDesc = "",
+                            playbackRecoveryStatus = PlaybackDiagnostics.STATUS_IDLE,
+                        )
+                    }
                 }
 
                 "group/update" -> {
@@ -1888,7 +2297,15 @@ class SendspinPcmClient(
                 }
 
                 lastChunkServerTimestampUs = tsServerUs
-                jitter.offer(tsServerUs, encodedData)
+
+                if (codec == "opus") {
+                    if (opusDecoder == null) {
+                        return
+                    }
+                    enqueueOpusChunk(tsServerUs, encodedData)
+                } else {
+                    jitter.offer(tsServerUs, encodedData)
+                }
             }
         }
     }
@@ -1929,7 +2346,8 @@ class SendspinPcmClient(
             "CRITICAL memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 150 for LAN stability)",
         )
         jitter.trimTo(targetSize)
-        opusDecoder = null // Still free decoder
+        stopOpusDecodeThread()
+        opusDecoder = null
         // Update UI to reflect buffer state
         val snapshot = jitter.snapshot()
         onUiUpdate {

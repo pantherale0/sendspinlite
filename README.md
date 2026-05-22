@@ -15,7 +15,7 @@ This project is specially designed for low memory devices and a local network co
   - Startup and restart catch-up logic to prevent buffer deadlock
 
 ### Audio Codec Support
-- **PCM and Opus** — both advertised in `client/hello`; the server selects the stream format
+- **PCM and Opus** — both advertised in `client/hello` (PCM listed first as preferred); the server selects the stream format
   - Opus decoding via Concentus (pure Java library)
   - Support for 16-bit, 24-bit, and 32-bit PCM output
   - Configurable sample rates and channel counts
