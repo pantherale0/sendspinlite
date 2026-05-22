@@ -4,6 +4,11 @@ import java.util.PriorityQueue
 import java.util.concurrent.atomic.AtomicLong
 
 class AudioJitterBuffer(private val clockSync: ClockSync) {
+    companion object {
+        /** Hard cap on queued PCM chunks (~30s at 48 kHz stereo). */
+        const val DEFAULT_MAX_BUFFER_CHUNKS = 1500
+    }
+
     data class Snapshot(
         val queuedChunks: Int,
         val bufferAheadMs: Long,
@@ -20,7 +25,7 @@ class AudioJitterBuffer(private val clockSync: ClockSync) {
     // At 48kHz stereo 16-bit, each ~21ms chunk is ~4KB.
     // 1500 chunks ≈ 6MB max buffer, ~30 seconds of audio — large enough to absorb
     // Music Assistant's burst prefetch on stream start without dropping decoded audio.
-    private val maxBufferChunks = 1500
+    private val maxBufferChunks = DEFAULT_MAX_BUFFER_CHUNKS
 
     private val q = PriorityQueue<Chunk>(compareBy { it.serverTimestampUs })
     private val lateDropsCounter = AtomicLong(0L)
