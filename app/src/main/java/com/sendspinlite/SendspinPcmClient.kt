@@ -1675,7 +1675,7 @@ class SendspinPcmClient(
                                     } else {
                                         0L
                                     }
-                                playoutOffsetAdjustmentUs = -pullForwardUs
+                                playoutOffsetAdjustmentUs = pullForwardUs
                                 playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START
                                 val pcmStartMode =
                                     if (canStartPcmDeepBacklog) "pcm_deep_backlog" else "pcm_buffered"
