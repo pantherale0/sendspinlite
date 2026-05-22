@@ -42,6 +42,10 @@ class SendspinPcmClient(
         /** Pending Opus frames awaiting decode; drop oldest when full to stay near live edge. */
         private const val MAX_OPUS_PENDING_FRAMES = 2400
 
+        /** Compressed-byte cap for [opusPending] (frames × max Opus packet size). */
+        private const val MAX_OPUS_PENDING_BYTES =
+            MAX_OPUS_PENDING_FRAMES * OpusFormatPolicy.MAX_PACKET_BYTES
+
         private const val OPUS_WARM_DECODE_MAX_US = 20_000L
         private const val OPUS_PENDING_STALE_DROP_US = 150_000L
         private const val OPUS_POST_DECODE_STALE_DROP_US = 150_000L
@@ -170,7 +174,9 @@ class SendspinPcmClient(
     private var opusDecodeHandler: Handler? = null
     private val opusPending = ArrayDeque<Pair<Long, ByteArray>>()
     private val opusPendingLock = Any()
+    private var opusPendingEncodedBytes = 0
     private var opusDecodeErrorLogs = 0
+    private var opusIngressRejectLogs = 0
     private var prestartLateRestartLoops = 0
     private var prestartFarAheadSinceMs = 0L
 
@@ -433,8 +439,7 @@ class SendspinPcmClient(
         output.stop()
         jitter.clear()
         opusDecoder = null
-        decodeLatencyUs = 0L
-        decodeLatencySamples.clear()
+        resetOpusDecodeLatencyStats()
         playAtServerUs = Long.MIN_VALUE
         lastChunkServerTimestampUs = Long.MIN_VALUE
         inDiscontinuityMode = false
@@ -518,6 +523,12 @@ class SendspinPcmClient(
 
         // Calculate moving average
         decodeLatencyUs = decodeLatencySamples.average().toLong()
+    }
+
+    /** Cleared on new stream so [isOpusDecoderWarm] reflects the current decoder session, not the last. */
+    private fun resetOpusDecodeLatencyStats() {
+        decodeLatencyUs = 0L
+        decodeLatencySamples.clear()
     }
 
     private fun isOpusDecoderWarm(): Boolean {
@@ -651,7 +662,10 @@ class SendspinPcmClient(
     }
 
     private fun stopOpusDecodeThread() {
-        synchronized(opusPendingLock) { opusPending.clear() }
+        synchronized(opusPendingLock) {
+            opusPending.clear()
+            opusPendingEncodedBytes = 0
+        }
         opusDecodeHandler = null
         opusDecodeThread?.quitSafely()
         opusDecodeThread = null
@@ -667,12 +681,29 @@ class SendspinPcmClient(
         encoded: ByteArray,
     ) {
         if (streamEnded) return
+        if (!OpusFormatPolicy.isAcceptableIngressPacket(encoded.size)) {
+            if (opusIngressRejectLogs < 8) {
+                opusIngressRejectLogs++
+                Log.w(
+                    tag,
+                    "Dropping invalid Opus packet size=${encoded.size} " +
+                        "(max=${OpusFormatPolicy.MAX_PACKET_BYTES})",
+                )
+            }
+            return
+        }
         ensureOpusDecodeThread()
         synchronized(opusPendingLock) {
-            while (opusPending.size >= MAX_OPUS_PENDING_FRAMES) {
-                opusPending.removeFirst()
+            while (
+                opusPending.size >= MAX_OPUS_PENDING_FRAMES ||
+                opusPendingEncodedBytes + encoded.size > MAX_OPUS_PENDING_BYTES
+            ) {
+                if (opusPending.isEmpty()) break
+                val removed = opusPending.removeFirst()
+                opusPendingEncodedBytes -= removed.second.size
             }
             opusPending.addLast(serverTsUs to encoded)
+            opusPendingEncodedBytes += encoded.size
         }
         opusDecodeHandler?.removeCallbacks(opusDrainRunnable)
         opusDecodeHandler?.post(opusDrainRunnable)
@@ -2019,28 +2050,47 @@ class SendspinPcmClient(
                         if (codec == "opus") {
                             // Decoder output is always 16-bit PCM; AudioTrack must match.
                             bitDepth = 16
-                            try {
-                                val existing = opusDecoder
-                                val reusingDecoder =
-                                    existing != null &&
-                                        existing.sampleRate == streamSampleRate &&
-                                        existing.channels == streamChannels
-                                if (reusingDecoder) {
-                                    existing.reset()
-                                } else {
-                                    opusDecoder = OpusDecoder(streamSampleRate, streamChannels)
-                                    decodeLatencyUs = 0L
-                                    decodeLatencySamples.clear()
-                                }
-                                sampleRate = streamSampleRate
-                                channels = streamChannels
-                                opusWarmupDone = true
-                                ensureOpusDecodeThread()
-                                opusDecodeHandler?.post { drainOpusPendingQueue() }
-                            } catch (e: Exception) {
-                                Log.e(tag, "Failed to create Opus decoder", e)
+                            if (
+                                !OpusFormatPolicy.isAdvertisedOpusStream(
+                                    streamSampleRate,
+                                    streamChannels,
+                                    bitDepth,
+                                )
+                            ) {
+                                Log.w(
+                                    tag,
+                                    "Rejecting unsupported Opus stream/start: " +
+                                        "sr=$streamSampleRate ch=$streamChannels bd=$bitDepth",
+                                )
+                                stopOpusDecodeThread()
                                 opusDecoder = null
+                                opusIngressRejectLogs = 0
                                 sendClientStateError()
+                            } else {
+                                try {
+                                    val existing = opusDecoder
+                                    val reusingDecoder =
+                                        existing != null &&
+                                            existing.sampleRate == streamSampleRate &&
+                                            existing.channels == streamChannels
+                                    if (reusingDecoder) {
+                                        existing.reset()
+                                        resetOpusDecodeLatencyStats()
+                                    } else {
+                                        opusDecoder = OpusDecoder(streamSampleRate, streamChannels)
+                                        resetOpusDecodeLatencyStats()
+                                    }
+                                    sampleRate = streamSampleRate
+                                    channels = streamChannels
+                                    opusWarmupDone = false
+                                    opusIngressRejectLogs = 0
+                                    ensureOpusDecodeThread()
+                                    opusDecodeHandler?.post { drainOpusPendingQueue() }
+                                } catch (e: Exception) {
+                                    Log.e(tag, "Failed to create Opus decoder", e)
+                                    opusDecoder = null
+                                    sendClientStateError()
+                                }
                             }
                         } else {
                             opusDecoder = null
@@ -2347,6 +2397,17 @@ class SendspinPcmClient(
                 // Audio chunk (player role)
                 if (codec != "pcm" && codec != "opus") return
                 if (data.size < 1 + 8 + 1) return
+                if (codec == "opus" && data.size > OpusFormatPolicy.maxType4FrameBytes()) {
+                    if (opusIngressRejectLogs < 8) {
+                        opusIngressRejectLogs++
+                        Log.w(
+                            tag,
+                            "Dropping oversized Opus wire frame: ${data.size} bytes " +
+                                "(max=${OpusFormatPolicy.maxType4FrameBytes()})",
+                        )
+                    }
+                    return
+                }
 
                 val tsServerUs = readInt64BE(data, 1)
                 val encodedData = data.copyOfRange(1 + 8, data.size)

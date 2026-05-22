@@ -21,10 +21,21 @@ class OpusDecoder(
     private val tag = "OpusDecoder"
     private val decoderLock = Any()
 
+    init {
+        require(
+            OpusFormatPolicy.isAdvertisedOpusStream(
+                sampleRate,
+                channels,
+                OpusFormatPolicy.REQUIRED_BIT_DEPTH,
+            ),
+        ) {
+            "Unsupported Opus decoder config: sampleRate=$sampleRate channels=$channels"
+        }
+    }
+
     companion object {
         private const val MAX_FRAME_SIZE = 5760
         private const val OPUS_FRAMES_PER_SECOND = 50
-        private const val MAX_OPUS_PACKET_BYTES = 1275
 
         /** Valid Opus frame for JIT warmup — generated locally, no network needed. */
         fun createWarmupPacket(
@@ -34,7 +45,7 @@ class OpusDecoder(
             val encoder = OpusEncoder(sampleRate, channels, OpusApplication.OPUS_APPLICATION_AUDIO)
             val frameSamples = sampleRate / OPUS_FRAMES_PER_SECOND
             val pcm = ShortArray(frameSamples * channels)
-            val out = ByteArray(MAX_OPUS_PACKET_BYTES)
+            val out = ByteArray(OpusFormatPolicy.MAX_PACKET_BYTES)
             val len = encoder.encode(pcm, 0, frameSamples, out, 0, out.size)
             check(len > 0) { "Opus encoder produced no output for warmup packet" }
             return out.copyOf(len)
