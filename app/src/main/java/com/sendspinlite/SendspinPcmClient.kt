@@ -884,7 +884,7 @@ class SendspinPcmClient(
 
         // PCM first (preferred on constrained devices); Opus offered as alternative.
         for (sampleRate in listOf(48000, 44100)) {
-            for (bitDepth in listOf(16, 24, 32)) {
+            for (bitDepth in PcmAudioOutput.advertisedPcmBitDepths()) {
                 supportedFormats
                     .put(
                         JSONObject().put("codec", "pcm").put("channels", 2)
@@ -1236,7 +1236,7 @@ class SendspinPcmClient(
                     context = context,
                     sampleRateCandidates = listOf(48_000, 44_100),
                     channelCandidates = listOf(2, 1),
-                    bitDepthCandidates = listOf(32, 24, 16),
+                    bitDepthCandidates = PcmAudioOutput.advertisedPcmBitDepths(),
                 ) ?: PcmAudioOutput.PcmFormat(48_000, 2, 16)
 
             selectedFormatText = "${selected.sampleRate}/${selected.channels}/${selected.bitDepth}"
@@ -1435,8 +1435,13 @@ class SendspinPcmClient(
                                                 snapshot.queuedChunks < minBufferedPrefetchChunks
                                         )
                                 )
+                        // PCM uses wire timestamps; while output is stopped the server clock advances so
+                        // time-based prestart trim falsely marks every chunk late and drops the buffer.
+                        val skipPcmPrestartTimeTrim = codec == "pcm"
+                        val skipPrestartCatchupTrim =
+                            skipOpusCatchupWhileWarming || skipPcmPrestartTimeTrim
                         if (
-                            !skipOpusCatchupWhileWarming &&
+                            !skipPrestartCatchupTrim &&
                             snapshot.queuedChunks > 0 &&
                             snapshot.bufferAheadMs < restartDropTriggerAheadMs
                         ) {
@@ -1479,7 +1484,11 @@ class SendspinPcmClient(
                         }
 
                         // Large prestart backlog with a nearly-live head: trim to the start window in one pass.
-                        if (snap2.queuedChunks >= prestartBacklogChunkThreshold && snap2.bufferAheadMs < restartMinAheadMs) {
+                        if (
+                            !skipPcmPrestartTimeTrim &&
+                            snap2.queuedChunks >= prestartBacklogChunkThreshold &&
+                            snap2.bufferAheadMs < restartMinAheadMs
+                        ) {
                             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_BACKLOG_TRIM
                             val targetAheadMs = if (forceResyncMode) resyncMinBufferMs else minBufferMs
                             val trimmed = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
@@ -1606,6 +1615,20 @@ class SendspinPcmClient(
                                 snapForStart.bufferAheadMs >= -warmStartMaxLateMs &&
                                 snapForStart.bufferAheadMs <= activeStartMaxMs + 50L
 
+                        val canStartPcmBuffered =
+                            codec == "pcm" &&
+                                snapForStart.queuedChunks >= minWarmStartQueued &&
+                                snapForStart.bufferAheadMs >= -warmStartMaxLateMs &&
+                                snapForStart.bufferAheadMs <= activeStartMaxMs + 50L
+
+                        // Large PCM prestart backlog whose head is far behind server "now" (clock
+                        // advanced while output was stopped). Start with pull-forward instead of
+                        // waiting for the start window that will never arrive.
+                        val canStartPcmDeepBacklog =
+                            codec == "pcm" &&
+                                snapForStart.queuedChunks >= minBufferedPrefetchChunks &&
+                                snapForStart.bufferAheadMs < -warmStartMaxLateMs
+
                         val canStartScheduledPrefetch =
                             snapForStart.queuedChunks >= restartMinQueued &&
                                 snapForStart.bufferAheadMs > activeStartMaxMs &&
@@ -1618,6 +1641,8 @@ class SendspinPcmClient(
                                 canStartLateRecovery ||
                                 forceLateStart ||
                                 canStartOpusWarmLowMem ||
+                                canStartPcmBuffered ||
+                                canStartPcmDeepBacklog ||
                                 canStartBufferedPrefetch ||
                                 canStartScheduledPrefetch
 
@@ -1642,6 +1667,22 @@ class SendspinPcmClient(
                                     "mode=warm_lowmem ahead=${snapForStart.bufferAheadMs}ms " +
                                         "pullForwardMs=${pullForwardUs / 1000} queued=${snapForStart.queuedChunks} " +
                                         "decodeAvgUs=$decodeLatencyUs",
+                                )
+                            } else if ((canStartPcmBuffered || canStartPcmDeepBacklog) && !canStartNormally) {
+                                val pullForwardUs =
+                                    if (snapForStart.bufferAheadMs < 0L) {
+                                        (-snapForStart.bufferAheadMs + 50L) * 1000L
+                                    } else {
+                                        0L
+                                    }
+                                playoutOffsetAdjustmentUs = pullForwardUs
+                                playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START
+                                val pcmStartMode =
+                                    if (canStartPcmDeepBacklog) "pcm_deep_backlog" else "pcm_buffered"
+                                recordRecoveryEvent(
+                                    PlaybackDiagnostics.STATUS_PRESTART_PREFETCH_START,
+                                    "mode=$pcmStartMode ahead=${snapForStart.bufferAheadMs}ms " +
+                                        "pullForwardMs=${pullForwardUs / 1000} queued=${snapForStart.queuedChunks}",
                                 )
                             } else if (canStartBufferedPrefetch && !canStartNormally) {
                                 val pullForwardUs =
@@ -1717,7 +1758,22 @@ class SendspinPcmClient(
                         }
                     }
 
-                    val chunk = jitter.pollPlayable(nowUs(), lateDropUs)
+                    val pollNowUs = nowUs()
+                    val sinceOutputStartForPollUs =
+                        if (outputStartedAtUs > 0L) {
+                            (pollNowUs - outputStartedAtUs).coerceAtLeast(0L)
+                        } else {
+                            Long.MAX_VALUE
+                        }
+                    // PCM startup: buffered head can be >200ms behind server time until pull-forward
+                    // adjustment takes effect; avoid draining the queue immediately after start.
+                    val pollLateDropUs =
+                        if (codec == "pcm" && sinceOutputStartForPollUs < OPUS_STARTUP_AUDIO_CUT_GRACE_US) {
+                            500_000L
+                        } else {
+                            lateDropUs
+                        }
+                    val chunk = jitter.pollPlayable(pollNowUs, pollLateDropUs)
                     if (chunk == null) {
                         if (jitter.isEmpty() && !streamEnded) {
                             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_UNDERRUN
@@ -1826,9 +1882,12 @@ class SendspinPcmClient(
                     val startupCutGraceActive = sinceOutputStartUs < startupCutGraceUs
                     val opusStartupGraceActive =
                         codec == "opus" && sinceOutputStartUs < OPUS_STARTUP_AUDIO_CUT_GRACE_US
+                    val pcmStartupGraceActive =
+                        codec == "pcm" && sinceOutputStartUs < OPUS_STARTUP_AUDIO_CUT_GRACE_US
                     val effectiveOutOfSyncThresholdMs =
                         when {
-                            opusStartupGraceActive -> audioOutOfSyncThresholdMs + 500L
+                            opusStartupGraceActive || pcmStartupGraceActive ->
+                                audioOutOfSyncThresholdMs + 500L
                             startupCutGraceActive -> audioOutOfSyncThresholdMs + 120L
                             else -> audioOutOfSyncThresholdMs
                         }
@@ -2046,54 +2105,73 @@ class SendspinPcmClient(
                         codec = player.optString("codec", codec)
                         val streamSampleRate = player.optInt("sample_rate", sampleRate)
                         val streamChannels = player.optInt("channels", channels)
-                        bitDepth = player.optInt("bit_depth", bitDepth)
-                        if (codec == "opus") {
-                            // Decoder output is always 16-bit PCM; AudioTrack must match.
-                            bitDepth = 16
-                            if (
-                                !OpusFormatPolicy.isAdvertisedOpusStream(
-                                    streamSampleRate,
-                                    streamChannels,
-                                    bitDepth,
-                                )
-                            ) {
-                                Log.w(
-                                    tag,
-                                    "Rejecting unsupported Opus stream/start: " +
-                                        "sr=$streamSampleRate ch=$streamChannels bd=$bitDepth",
-                                )
-                                stopOpusDecodeThread()
-                                opusDecoder = null
-                                opusIngressRejectLogs = 0
-                                sendClientStateError()
-                            } else {
-                                try {
-                                    val existing = opusDecoder
-                                    val reusingDecoder =
-                                        existing != null &&
-                                            existing.sampleRate == streamSampleRate &&
-                                            existing.channels == streamChannels
-                                    if (reusingDecoder) {
-                                        existing.reset()
-                                        resetOpusDecodeLatencyStats()
-                                    } else {
-                                        opusDecoder = OpusDecoder(streamSampleRate, streamChannels)
-                                        resetOpusDecodeLatencyStats()
-                                    }
-                                    sampleRate = streamSampleRate
-                                    channels = streamChannels
-                                    opusWarmupDone = false
-                                    opusIngressRejectLogs = 0
-                                    ensureOpusDecodeThread()
-                                    opusDecodeHandler?.post { drainOpusPendingQueue() }
-                                } catch (e: Exception) {
-                                    Log.e(tag, "Failed to create Opus decoder", e)
+                        val streamBitDepth = player.optInt("bit_depth", bitDepth)
+                        when (codec) {
+                            "opus" -> {
+                                // Decoder output is always 16-bit PCM; AudioTrack must match.
+                                bitDepth = 16
+                                if (
+                                    !OpusFormatPolicy.isAdvertisedOpusStream(
+                                        streamSampleRate,
+                                        streamChannels,
+                                        bitDepth,
+                                    )
+                                ) {
+                                    Log.w(
+                                        tag,
+                                        "Rejecting unsupported Opus stream/start: " +
+                                            "sr=$streamSampleRate ch=$streamChannels bd=$bitDepth",
+                                    )
+                                    stopOpusDecodeThread()
                                     opusDecoder = null
+                                    opusIngressRejectLogs = 0
                                     sendClientStateError()
+                                } else {
+                                    try {
+                                        val existing = opusDecoder
+                                        val reusingDecoder =
+                                            existing != null &&
+                                                existing.sampleRate == streamSampleRate &&
+                                                existing.channels == streamChannels
+                                        if (reusingDecoder) {
+                                            existing.reset()
+                                            resetOpusDecodeLatencyStats()
+                                        } else {
+                                            opusDecoder = OpusDecoder(streamSampleRate, streamChannels)
+                                            resetOpusDecodeLatencyStats()
+                                        }
+                                        sampleRate = streamSampleRate
+                                        channels = streamChannels
+                                        opusWarmupDone = false
+                                        opusIngressRejectLogs = 0
+                                        ensureOpusDecodeThread()
+                                        opusDecodeHandler?.post { drainOpusPendingQueue() }
+                                    } catch (e: Exception) {
+                                        Log.e(tag, "Failed to create Opus decoder", e)
+                                        opusDecoder = null
+                                        sendClientStateError()
+                                    }
                                 }
                             }
-                        } else {
-                            opusDecoder = null
+                            "pcm" -> {
+                                opusDecoder = null
+                                if (!PcmAudioOutput.isPcmBitDepthSupported(streamBitDepth)) {
+                                    Log.w(
+                                        tag,
+                                        "Rejecting unsupported PCM stream/start: " +
+                                            "sr=$streamSampleRate ch=$streamChannels bd=$streamBitDepth " +
+                                            "(sdk=${android.os.Build.VERSION.SDK_INT})",
+                                    )
+                                    sendClientStateError()
+                                } else {
+                                    sampleRate = streamSampleRate
+                                    channels = streamChannels
+                                    bitDepth = streamBitDepth
+                                }
+                            }
+                            else -> {
+                                opusDecoder = null
+                            }
                         }
                         playAtServerUs =
                             if (player.has("play_at")) {
