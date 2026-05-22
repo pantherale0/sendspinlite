@@ -3,6 +3,7 @@ package com.sendspinlite
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.*
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
@@ -23,6 +24,44 @@ class PcmAudioOutput {
         /** Safety ceiling for pipeline latency estimation (2 seconds). */
         private const val MAX_PIPELINE_LATENCY_US = 2_000_000L
         private const val SOFT_START_RAMP_MS = 35L
+
+        /** Bit depths we may advertise in client/hello; server must not exceed these. */
+        private val PCM_BIT_DEPTH_CANDIDATES = listOf(32, 24, 16)
+
+        private fun encodingFor(bitDepth: Int): Int =
+            when (bitDepth) {
+                16 -> AudioFormat.ENCODING_PCM_16BIT
+                24 -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        AudioFormat.ENCODING_PCM_24BIT_PACKED
+                    } else {
+                        error("24-bit PCM playback requires API 31+")
+                    }
+                }
+                32 -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        AudioFormat.ENCODING_PCM_32BIT
+                    } else {
+                        error("32-bit PCM playback requires API 31+")
+                    }
+                }
+                else -> error("Unsupported bit depth: $bitDepth")
+            }
+
+        fun isPcmBitDepthSupported(bitDepth: Int): Boolean =
+            try {
+                val encoding = encodingFor(bitDepth)
+                AudioTrack.getMinBufferSize(
+                    48_000,
+                    AudioFormat.CHANNEL_OUT_STEREO,
+                    encoding,
+                ) > 0
+            } catch (_: Throwable) {
+                false
+            }
+
+        fun advertisedPcmBitDepths(): List<Int> =
+            PCM_BIT_DEPTH_CANDIDATES.filter { isPcmBitDepthSupported(it) }.ifEmpty { listOf(16) }
     }
 
     @Volatile
@@ -67,6 +106,9 @@ class PcmAudioOutput {
         bitDepth: Int,
     ) {
         synchronized(lock) {
+            require(isPcmBitDepthSupported(bitDepth)) {
+                "PCM bit depth $bitDepth is not supported on this device (sdk=${Build.VERSION.SDK_INT})"
+            }
             // Check if we can reuse the existing track
             val existingTrack = track
             if (existingTrack != null &&
@@ -96,8 +138,6 @@ class PcmAudioOutput {
 
             // Full recreate needed (format changed or track invalid)
             stop()
-
-            require(bitDepth in listOf(16, 24, 32)) { "Unsupported bit depth: $bitDepth. Must be 16, 24, or 32-bit PCM" }
 
             val channelMask = channelMaskFor(channels)
             val encoding = encodingFor(bitDepth)
@@ -160,7 +200,11 @@ class PcmAudioOutput {
                 currentChannels = channels
                 currentBitDepth = bitDepth
 
-                Log.i(tag, "AudioTrack started sr=$safeSampleRate ch=$channels bd=$bitDepth minBuf=$minBuf bufferBytes=$bufferBytes")
+                Log.i(
+                    tag,
+                    "AudioTrack started sr=$safeSampleRate ch=$channels bd=$bitDepth " +
+                        "minBuf=$minBuf bufferBytes=$bufferBytes",
+                )
             } catch (e: Exception) {
                 Log.e(tag, "Failed to create/start AudioTrack", e)
                 started.set(false)
@@ -728,11 +772,5 @@ class PcmAudioOutput {
             else -> error("Unsupported channel count: $channels")
         }
 
-    private fun encodingFor(bitDepth: Int): Int =
-        when (bitDepth) {
-            16 -> AudioFormat.ENCODING_PCM_16BIT
-            24 -> AudioFormat.ENCODING_PCM_24BIT_PACKED
-            32 -> AudioFormat.ENCODING_PCM_32BIT
-            else -> error("Unsupported bit depth: $bitDepth")
-        }
+    private fun encodingFor(bitDepth: Int): Int = Companion.encodingFor(bitDepth)
 }
