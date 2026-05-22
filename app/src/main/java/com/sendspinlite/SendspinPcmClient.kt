@@ -33,6 +33,7 @@ class SendspinPcmClient(
         private const val KEY_AUDIO_WARMUP_BASELINE_TIMESTAMP_MS = "audio_warmup_baseline_timestamp_ms"
         private const val MAX_CLOCK_UNCERTAINTY_FOR_START_US = 50_000L
         private const val MAX_RTT_FOR_START_US = 2_000_000L
+        private const val TIME_SYNC_RESPONSE_TIMEOUT_MS = 2_000L
         private const val RTT_AUDIO_CUT_INFLATE_DIVISOR = 2000L
         private const val RTT_AUDIO_CUT_INFLATE_MAX_MS = 500L
 
@@ -145,6 +146,7 @@ class SendspinPcmClient(
     private val clock = ClockSync()
     private val jitter = AudioJitterBuffer(clock)
     private val output: PcmAudioOutput = PcmAudioOutput()
+    private val timeSyncRequestGate = TimeSyncRequestGate(TIME_SYNC_RESPONSE_TIMEOUT_MS)
 
     private var timeLoopJob: Job? = null
     private var playoutJob: Job? = null
@@ -179,6 +181,7 @@ class SendspinPcmClient(
     private var opusIngressRejectLogs = 0
     private var prestartLateRestartLoops = 0
     private var prestartFarAheadSinceMs = 0L
+    private var lastStaleTimeSyncLogMs = 0L
 
     private var playAtServerUs: Long = Long.MIN_VALUE
 
@@ -1023,12 +1026,13 @@ class SendspinPcmClient(
 
     private fun startTimeSyncLoop() {
         timeLoopJob?.cancel()
+        timeSyncRequestGate.reset()
         timeLoopJob =
             scope.launch {
                 var lastFrequencyLogMs: Long = 0
 
                 while (isActive && isConnected.get()) {
-                    sendJson("client/time", JSONObject().put("client_transmitted", nowUs()))
+                    sendTimeSyncRequestIfAllowed()
 
                     // ADAPTIVE FREQUENCY based on network conditions and clock stability
                     // For multi-device sync, use more aggressive initial sync frequency
@@ -1050,6 +1054,13 @@ class SendspinPcmClient(
                     delay(nextIntervalMs)
                 }
             }
+    }
+
+    private fun sendTimeSyncRequestIfAllowed() {
+        val clientTxUs = nowUs()
+        if (timeSyncRequestGate.shouldSendRequest(clientTxUs, System.currentTimeMillis())) {
+            sendJson("client/time", JSONObject().put("client_transmitted", clientTxUs))
+        }
     }
 
     private fun startStatsLoop() {
@@ -1098,6 +1109,14 @@ class SendspinPcmClient(
                     delay(1000L) // Run every second for responsive stat updates
                 }
             }
+    }
+
+    private fun logStaleTimeSyncResponse(clientTxUs: Long) {
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastStaleTimeSyncLogMs >= 1000L) {
+            lastStaleTimeSyncLogMs = nowMs
+            Log.d(tag, "Ignoring stale server/time response for client_transmitted=$clientTxUs")
+        }
     }
 
     private fun startPlaybackSpeedAdjustmentLoop() {
@@ -2017,6 +2036,10 @@ class SendspinPcmClient(
                     // No epoch or unit conversion is needed -- the Kalman filter tracks
                     // the offset between the two monotonic clocks directly.
                     val clientTx = payload.getLong("client_transmitted")
+                    if (!timeSyncRequestGate.acceptResponse(clientTx, System.currentTimeMillis())) {
+                        logStaleTimeSyncResponse(clientTx)
+                        return
+                    }
                     val sRecv = payload.getLong("server_received")
                     val sTx = payload.getLong("server_transmitted")
                     val clientRx = nowUs()
