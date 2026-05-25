@@ -15,7 +15,9 @@ This project is specially designed for low memory devices and a local network co
   - Startup and restart catch-up logic to prevent buffer deadlock
 
 ### Audio Codec Support
-- **PCM and Opus** — both advertised in `client/hello` (PCM listed first as preferred); the server selects the stream format
+- **Flexible codec configuration**
+  - PCM-only mode by default (optimized for local WiFi)
+  - Opus support available via intent parameter
   - Opus decoding via Concentus (pure Java library)
   - Support for 16-bit, 24-bit, and 32-bit PCM output
   - Configurable sample rates and channel counts
@@ -91,6 +93,20 @@ This project is specially designed for low memory devices and a local network co
      ```
 4. Connect to the server.
 5. All configuration is performed server side.
+
+### Intent Parameters
+
+The app supports launch parameters for programmatic configuration:
+
+#### `enableOpusCodec` (Boolean, optional)
+- Enables Opus codec support
+- `true`: Opus offered as preferred codec (PCM as fallback)
+- `false`: PCM-only mode (default, optimized for local WiFi)
+- **Persistence**: Intent parameter overrides saved value and persists across restarts
+- Example:
+  ```bash
+  adb shell am start -n com.sendspinlite/.MainActivity --ez enableOpusCodec true
+  ```
 
 ## Architecture
 
