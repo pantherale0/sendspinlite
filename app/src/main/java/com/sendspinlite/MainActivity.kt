@@ -67,6 +67,12 @@ class MainActivity : ComponentActivity() {
         // Ensure system bars remain visible and don't draw behind them
         WindowCompat.setDecorFitsSystemWindows(window, true)
 
+        // Check if Opus codec is requested via intent (overrides saved value)
+        if (intent.hasExtra("enableOpusCodec")) {
+            val enableOpusCodec = intent.getBooleanExtra("enableOpusCodec", false)
+            vm.setEnableOpusCodec(enableOpusCodec)
+        }
+
         // Check if we need to show battery optimization warning (only on first launch)
         val prefs = getSharedPreferences("SendspinPlayerPrefs", MODE_PRIVATE)
         val shownBatteryWarning = prefs.getBoolean("shown_battery_optimization_warning", false)
@@ -1166,6 +1172,7 @@ private fun exportAndShareLogs(
         stringBuilder.append("Is TV: ${uiState.isTV}\n")
         stringBuilder.append("Playback Speed Multiplier: ${String.format("%.3f", uiState.playbackSpeedMultiplier)}x\n")
         stringBuilder.append("Static Delay: ${uiState.staticDelayMs}ms\n")
+        stringBuilder.append("Enable Opus Codec: ${uiState.enableOpusCodec}\n")
         stringBuilder.append("================================\n\n")
 
         // Current Stats Snapshot
