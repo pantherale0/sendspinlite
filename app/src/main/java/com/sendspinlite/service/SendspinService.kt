@@ -469,136 +469,140 @@ class SendspinService : Service() {
 
         // Listen to client diagnostics Flow
         scope.launch {
-            activeClient.diagnostics.collect { diag ->
-                val previousState = _uiState.value
-                var newState = previousState.copy(
-                    status = diag.status,
-                    connected = diag.connected,
-                    activeRoles = diag.activeRoles,
-                    playbackState = diag.playbackState,
-                    groupName = diag.groupName,
-                    streamDesc = diag.streamDesc,
-                    offsetUncertaintyUs = diag.offsetUncertaintyUs,
-                    driftPpm = diag.driftPpm,
-                    driftUncertaintyPpm = diag.driftUncertaintyPpm,
-                    driftSnr = diag.driftSnr,
-                    rttUs = diag.rttUs,
-                    networkQuality = diag.networkQuality,
-                    stability = diag.stability,
-                    connectionType = diag.connectionType,
-                    queuedChunks = diag.queuedChunks,
-                    bufferAheadMs = diag.bufferAheadMs,
-                    lateDrops = diag.lateDrops,
-                    audibleSyncCount = diag.audibleSyncCount,
-                    kalmanErrorCount = diag.kalmanErrorCount,
-                    groupVolume = diag.groupVolume,
-                    groupMuted = diag.groupMuted,
-                    supportedCommands = diag.supportedCommands,
-                    playbackSpeedMultiplier = diag.playbackSpeedMultiplier,
-                    smoothedLatencyMs = diag.smoothedLatencyMs,
-                    audioOutputStarted = diag.audioOutputStarted,
-                    playbackRecoveryStatus = diag.playbackRecoveryStatus,
-                    lastRecoveryEvent = diag.lastRecoveryEvent,
-                    clockReadyForPlayback = diag.clockReadyForPlayback,
-                    forceResyncActive = diag.forceResyncActive,
-                    inDiscontinuityRecovery = diag.inDiscontinuityRecovery,
-                    lateRestartLoops = diag.lateRestartLoops,
-                    effectiveBufferAheadMs = diag.effectiveBufferAheadMs,
-                    estimatedOffsetMs = diag.estimatedOffsetMs,
-                    playoutOffsetMs = diag.playoutOffsetMs,
-                    networkJitterMs = diag.networkJitterMs,
-                    clockUpdateCount = diag.clockUpdateCount,
-                    serverLatenessMs = diag.serverLatenessMs,
-                    lastAudioCutAgeMs = diag.lastAudioCutAgeMs,
-                    metadataTimestamp = diag.metadataTimestamp,
-                    trackTitle = diag.trackTitle,
-                    trackArtist = diag.trackArtist,
-                    albumTitle = diag.albumTitle,
-                    albumArtist = diag.albumArtist,
-                    trackYear = diag.trackYear,
-                    trackNumber = diag.trackNumber,
-                    artworkUrl = diag.artworkUrl,
-                    artworkBitmap = diag.artworkBitmap,
-                    trackProgress = diag.trackProgress,
-                    trackDuration = diag.trackDuration,
-                    playbackSpeed = diag.playbackSpeed,
-                    repeatMode = diag.repeatMode,
-                    shuffleEnabled = diag.shuffleEnabled,
-                    playerVolume = diag.playerVolume,
-                    playerVolumeFromServer = diag.playerVolumeFromServer,
-                    playerMuted = diag.playerMuted,
-                    playerMutedFromServer = diag.playerMutedFromServer,
-                    staticDelayMs = diag.staticDelayMs,
-                    staticDelayMsFromServer = diag.staticDelayMsFromServer
-                )
+            activeClient.diagnostics
+                .takeWhile { client === activeClient }
+                .collect { diag ->
+                    val previousState = _uiState.value
+                    var newState = previousState.copy(
+                        status = diag.status,
+                        connected = diag.connected,
+                        activeRoles = diag.activeRoles,
+                        playbackState = diag.playbackState,
+                        groupName = diag.groupName,
+                        streamDesc = diag.streamDesc,
+                        offsetUncertaintyUs = diag.offsetUncertaintyUs,
+                        driftPpm = diag.driftPpm,
+                        driftUncertaintyPpm = diag.driftUncertaintyPpm,
+                        driftSnr = diag.driftSnr,
+                        rttUs = diag.rttUs,
+                        networkQuality = diag.networkQuality,
+                        stability = diag.stability,
+                        connectionType = diag.connectionType,
+                        queuedChunks = diag.queuedChunks,
+                        bufferAheadMs = diag.bufferAheadMs,
+                        lateDrops = diag.lateDrops,
+                        audibleSyncCount = diag.audibleSyncCount,
+                        kalmanErrorCount = diag.kalmanErrorCount,
+                        groupVolume = diag.groupVolume,
+                        groupMuted = diag.groupMuted,
+                        supportedCommands = diag.supportedCommands,
+                        playbackSpeedMultiplier = diag.playbackSpeedMultiplier,
+                        smoothedLatencyMs = diag.smoothedLatencyMs,
+                        audioOutputStarted = diag.audioOutputStarted,
+                        playbackRecoveryStatus = diag.playbackRecoveryStatus,
+                        lastRecoveryEvent = diag.lastRecoveryEvent,
+                        clockReadyForPlayback = diag.clockReadyForPlayback,
+                        forceResyncActive = diag.forceResyncActive,
+                        inDiscontinuityRecovery = diag.inDiscontinuityRecovery,
+                        lateRestartLoops = diag.lateRestartLoops,
+                        effectiveBufferAheadMs = diag.effectiveBufferAheadMs,
+                        estimatedOffsetMs = diag.estimatedOffsetMs,
+                        playoutOffsetMs = diag.playoutOffsetMs,
+                        networkJitterMs = diag.networkJitterMs,
+                        clockUpdateCount = diag.clockUpdateCount,
+                        serverLatenessMs = diag.serverLatenessMs,
+                        lastAudioCutAgeMs = diag.lastAudioCutAgeMs,
+                        metadataTimestamp = diag.metadataTimestamp,
+                        trackTitle = diag.trackTitle,
+                        trackArtist = diag.trackArtist,
+                        albumTitle = diag.albumTitle,
+                        albumArtist = diag.albumArtist,
+                        trackYear = diag.trackYear,
+                        trackNumber = diag.trackNumber,
+                        artworkUrl = diag.artworkUrl,
+                        artworkBitmap = diag.artworkBitmap,
+                        trackProgress = diag.trackProgress,
+                        trackDuration = diag.trackDuration,
+                        playbackSpeed = diag.playbackSpeed,
+                        repeatMode = diag.repeatMode,
+                        shuffleEnabled = diag.shuffleEnabled,
+                        playerVolume = diag.playerVolume,
+                        playerVolumeFromServer = diag.playerVolumeFromServer,
+                        playerMuted = diag.playerMuted,
+                        playerMutedFromServer = diag.playerMutedFromServer,
+                        staticDelayMs = diag.staticDelayMs,
+                        staticDelayMsFromServer = diag.staticDelayMsFromServer
+                    )
 
-                // Mark that we had at least one successful websocket connection.
-                if (newState.connected && newState.status == "ws_open") {
-                    hasEstablishedConnection = true
-                    dropCountedForCurrentOutage = false
+                    // Mark that we had at least one successful websocket connection.
+                    if (newState.connected && newState.status == "ws_open") {
+                        hasEstablishedConnection = true
+                        dropCountedForCurrentOutage = false
+                    }
+
+                    // Count only unexpected connection losses, and only once per outage.
+                    val unexpectedDisconnect =
+                        hasEstablishedConnection &&
+                            previousState.connected &&
+                            !newState.connected &&
+                            (newState.status.startsWith("failure:") || newState.status.startsWith("closed:"))
+
+                    if (unexpectedDisconnect && !dropCountedForCurrentOutage) {
+                        dropCountedForCurrentOutage = true
+                        newState = newState.copy(connectionDrops = previousState.connectionDrops + 1)
+                        Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")
+                    }
+
+                    _uiState.value = newState
+                    updateNotification()
                 }
-
-                // Count only unexpected connection losses, and only once per outage.
-                val unexpectedDisconnect =
-                    hasEstablishedConnection &&
-                        previousState.connected &&
-                        !newState.connected &&
-                        (newState.status.startsWith("failure:") || newState.status.startsWith("closed:"))
-
-                if (unexpectedDisconnect && !dropCountedForCurrentOutage) {
-                    dropCountedForCurrentOutage = true
-                    newState = newState.copy(connectionDrops = previousState.connectionDrops + 1)
-                    Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")
-                }
-
-                _uiState.value = newState
-                updateNotification()
-            }
         }
 
         // Listen to server events (Volume, Mute, Delay changes)
         scope.launch {
-            activeClient.events.collect { event ->
-                when (event) {
-                    is ClientEvent.ServerVolumeChanged -> {
-                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                        val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-                        val systemVolume = (event.volume * maxVolume / 100)
-                        audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, systemVolume, 0)
-                        Log.i(tag, "Applied server volume command: ${event.volume}% (systemVolume=$systemVolume)")
-                        markServerVolumeSet()
+            activeClient.events
+                .takeWhile { client === activeClient }
+                .collect { event ->
+                    when (event) {
+                        is ClientEvent.ServerVolumeChanged -> {
+                            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                            val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                            val systemVolume = (event.volume * maxVolume / 100)
+                            audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, systemVolume, 0)
+                            Log.i(tag, "Applied server volume command: ${event.volume}% (systemVolume=$systemVolume)")
+                            markServerVolumeSet()
 
-                        // Sync volume to ViewModel via _uiState immediately
-                        _uiState.value = _uiState.value.copy(
-                            playerVolume = event.volume,
-                            playerVolumeFromServer = false
-                        )
-                    }
-                    is ClientEvent.ServerMutedChanged -> {
-                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                        if (event.muted) {
-                            audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
-                            Log.i(tag, "Applied server mute command: muted=true")
+                            // Sync volume to ViewModel via _uiState immediately
+                            _uiState.value = _uiState.value.copy(
+                                playerVolume = event.volume,
+                                playerVolumeFromServer = false
+                            )
                         }
-                        markServerVolumeSet()
+                        is ClientEvent.ServerMutedChanged -> {
+                            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                            if (event.muted) {
+                                audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
+                                Log.i(tag, "Applied server mute command: muted=true")
+                            }
+                            markServerVolumeSet()
 
-                        _uiState.value = _uiState.value.copy(
-                            playerMuted = event.muted,
-                            playerMutedFromServer = false
-                        )
-                    }
-                    is ClientEvent.ServerStaticDelayChanged -> {
-                        val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
-                        prefs.edit().putLong("static_delay_ms", event.delayMs).apply()
-                        Log.i(tag, "Persisted server-commanded static delay: ${event.delayMs}ms")
+                            _uiState.value = _uiState.value.copy(
+                                playerMuted = event.muted,
+                                playerMutedFromServer = false
+                            )
+                        }
+                        is ClientEvent.ServerStaticDelayChanged -> {
+                            val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
+                            prefs.edit().putLong("static_delay_ms", event.delayMs).apply()
+                            Log.i(tag, "Persisted server-commanded static delay: ${event.delayMs}ms")
 
-                        _uiState.value = _uiState.value.copy(
-                            staticDelayMs = event.delayMs,
-                            staticDelayMsFromServer = false
-                        )
+                            _uiState.value = _uiState.value.copy(
+                                staticDelayMs = event.delayMs,
+                                staticDelayMsFromServer = false
+                            )
+                        }
                     }
                 }
-            }
         }
 
         // Start health monitoring when connecting
