@@ -370,7 +370,7 @@ class ClockSync(
         // Update drift significance flag for time conversion methods
         // Only apply drift compensation if statistically significant (SNR check)
         val driftSquared = drift * drift
-        useDrift = driftSquared > (driftSignificanceThreshold * driftSignificanceThreshold) * driftCovariance
+        useDrift = driftSquared > (driftSignificanceThreshold * driftSignificanceThreshold) * driftCovariance.coerceAtLeast(0.0)
 
         // Publish snapshot for lock-free reads using effective drift
         val effectiveDrift = if (useDrift) drift else 0.0
