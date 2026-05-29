@@ -40,6 +40,10 @@ import com.sendspinlite.playback.PlaybackDiagnostics
 import java.util.*
 
 class MainActivity : ComponentActivity() {
+    private companion object {
+        const val TAG = "MainActivity"
+    }
+
     private val vm: PlayerViewModel by viewModels()
 
     private val nearbyWifiPermissionLauncher =
@@ -111,6 +115,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        try {
+            super.onResume()
+        } catch (e: IllegalArgumentException) {
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1 && e.isAndroidTopOfTaskResumeFailure()) {
+                Log.w(TAG, "Ignoring Android framework resume race from Activity.isTopOfTask", e)
+                return
+            }
+            throw e
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // Only disconnect if the activity is finishing (not just rotating or backgrounding)
@@ -138,6 +154,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+internal fun Throwable.isAndroidTopOfTaskResumeFailure(): Boolean =
+    this is IllegalArgumentException &&
+        stackTrace.any { it.className == "android.app.Activity" && it.methodName == "onResume" } &&
+        stackTrace.any { it.className == "android.app.Activity" && it.methodName == "isTopOfTask" }
 
 @Composable
 private fun PlayerScreen(
