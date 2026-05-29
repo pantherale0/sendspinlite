@@ -1,9 +1,10 @@
-package com.sendspinlite
+package com.sendspinlite.system
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.sendspinlite.service.SendspinService
 import android.provider.Settings
 
 class BootReceiver : BroadcastReceiver() {

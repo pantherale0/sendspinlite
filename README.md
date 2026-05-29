@@ -1,6 +1,6 @@
 # Sendspin Android Player
 
-A basic Android client for [Sendspin](https://github.com/sendspin) that provides synchronized network audio playback. It connects to a Sendspin-compatible server (e.g., Home Assistant) over WebSocket, receives timestamped PCM or Opus audio frames, performs clock synchronization and jitter buffering, and plays audio in tight sync with other devices.
+A basic Android client for [Sendspin](https://github.com/sendspin) that provides synchronized network audio playback. It connects to a Sendspin-compatible server (e.g., Home Assistant) over WebSocket, receives timestamped PCM audio frames, performs clock synchronization and jitter buffering, and plays audio in tight sync with other devices.
 
 This project is specially designed for low memory devices and a local network connection only. Connections via cellular will not be supported. The client is designed to offer only a Sendspin player.
 
@@ -15,10 +15,7 @@ This project is specially designed for low memory devices and a local network co
   - Startup and restart catch-up logic to prevent buffer deadlock
 
 ### Audio Codec Support
-- **Flexible codec configuration**
-  - PCM-only mode by default (optimized for local WiFi)
-  - Opus support available via intent parameter
-  - Opus decoding via Concentus (pure Java library)
+- **PCM playback**
   - Support for 16-bit, 24-bit, and 32-bit PCM output
   - Configurable sample rates and channel counts
 
@@ -93,21 +90,6 @@ This project is specially designed for low memory devices and a local network co
      ```
 4. Connect to the server.
 5. All configuration is performed server side.
-
-### Intent Parameters
-
-The app supports launch parameters for programmatic configuration:
-
-#### `enableOpusCodec` (Boolean, optional)
-- Enables Opus codec support
-- `true`: Opus offered as preferred codec (PCM as fallback)
-- `false`: PCM-only mode (default, optimized for local WiFi)
-- **Persistence**: Intent parameter overrides saved value and persists across restarts
-- Example:
-  ```bash
-  adb shell am start -n com.sendspinlite/.MainActivity --ez enableOpusCodec true
-  ```
-
 ## Architecture
 
 ### Core Components
@@ -134,10 +116,6 @@ The app supports launch parameters for programmatic configuration:
   - Late-frame detection and dropping
   - Restart recovery logic for buffer deadlock prevention
 
-- **OpusDecoder**
-  - Concentus-based Opus to PCM decoding
-  - Automatic fallback when unavailable
-
 - **PcmAudioOutput**
   - AndroidX AudioTrack wrapper
   - Multi-bit-depth support (16/24/32-bit)
@@ -160,7 +138,7 @@ The app supports launch parameters for programmatic configuration:
 ### Binary Audio Frames
 - Type: `0x04`
 - 8-byte big-endian server timestamp (microseconds)
-- Followed by PCM or Opus audio payload
+- Followed by PCM audio payload
 
 ### JSON Control Messages
 - **Handshake**: `client/hello`, `server/hello`

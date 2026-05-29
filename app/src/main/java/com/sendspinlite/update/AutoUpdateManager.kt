@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.update
 
 import android.app.DownloadManager
 import android.content.Context
@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
+import com.sendspinlite.BuildConfig
 import java.net.URL
 
 /**

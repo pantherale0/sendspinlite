@@ -1,6 +1,9 @@
 package com.sendspinlite
 
 import com.google.common.truth.Truth.assertThat
+import com.sendspinlite.diagnostics.AudioIssueReporter
+import com.sendspinlite.playback.PlaybackDiagnostics
+import com.sendspinlite.ui.PlayerViewModel
 import org.junit.Test
 
 class AudioIssueReporterTest {

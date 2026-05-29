@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.ui
 
 import android.Manifest
 import android.content.Intent
@@ -33,6 +33,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
+import com.sendspinlite.BuildConfig
+import com.sendspinlite.diagnostics.AudioIssueReporter
+import com.sendspinlite.diagnostics.CrashReportingManager
+import com.sendspinlite.playback.PlaybackDiagnostics
 import java.util.*
 
 class MainActivity : ComponentActivity() {
@@ -66,12 +70,6 @@ class MainActivity : ComponentActivity() {
 
         // Ensure system bars remain visible and don't draw behind them
         WindowCompat.setDecorFitsSystemWindows(window, true)
-
-        // Check if Opus codec is requested via intent (overrides saved value)
-        if (intent.hasExtra("enableOpusCodec")) {
-            val enableOpusCodec = intent.getBooleanExtra("enableOpusCodec", false)
-            vm.setEnableOpusCodec(enableOpusCodec)
-        }
 
         // Check if we need to show battery optimization warning (only on first launch)
         val prefs = getSharedPreferences("SendspinPlayerPrefs", MODE_PRIVATE)
@@ -1172,7 +1170,6 @@ private fun exportAndShareLogs(
         stringBuilder.append("Is TV: ${uiState.isTV}\n")
         stringBuilder.append("Playback Speed Multiplier: ${String.format("%.3f", uiState.playbackSpeedMultiplier)}x\n")
         stringBuilder.append("Static Delay: ${uiState.staticDelayMs}ms\n")
-        stringBuilder.append("Enable Opus Codec: ${uiState.enableOpusCodec}\n")
         stringBuilder.append("================================\n\n")
 
         // Current Stats Snapshot

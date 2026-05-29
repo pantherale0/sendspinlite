@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.diagnostics
 
 import android.content.Context
 import android.net.Uri
@@ -14,6 +14,12 @@ import io.sentry.protocol.SentryId
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
+import com.sendspinlite.BuildConfig
+import com.sendspinlite.client.SendspinPcmClient
+import com.sendspinlite.playback.PcmAudioOutput
+import com.sendspinlite.playback.PlaybackDiagnostics
+import com.sendspinlite.sync.ClockSync
+import com.sendspinlite.ui.PlayerViewModel
 import java.util.Locale
 
 /**
@@ -51,9 +57,8 @@ object AudioIssueReporter {
         sb.appendLine("========================================")
         sb.appendLine()
 
-        // Audio configuration (no PII — codec choice, delay and speed are pipeline settings)
         sb.appendLine("=== AUDIO CONFIGURATION ===")
-        sb.appendLine("Codec             : ${if (uiState.enableOpusCodec) "Opus" else "PCM"}")
+        sb.appendLine("Codec             : PCM")
         sb.appendLine("Static Delay      : ${uiState.staticDelayMs} ms")
         sb.appendLine("Playback Speed    : ${"%.3f".format(uiState.playbackSpeedMultiplier)}x")
         sb.appendLine("Low Memory Device : ${uiState.isLowMemoryDevice}")
@@ -113,7 +118,6 @@ object AudioIssueReporter {
         sb.appendLine("Effective Ahead   : ${uiState.effectiveBufferAheadMs} ms")
         sb.appendLine("Est. Offset       : ${uiState.estimatedOffsetMs} ms")
         sb.appendLine("Playout Offset    : ${uiState.playoutOffsetMs} ms")
-        sb.appendLine("Decode Latency    : ${uiState.decodeLatencyMs} ms")
         sb.appendLine("Network Jitter    : ${uiState.networkJitterMs} ms")
         sb.appendLine("Clock Updates     : ${uiState.clockUpdateCount}")
         sb.appendLine()

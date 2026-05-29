@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.playback
 
 /**
  * Playback recovery / pipeline status strings used in UI, logs, and audio issue reports.

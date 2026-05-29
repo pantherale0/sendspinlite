@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
-        android:name=".SendspinApplication"
+        android:name="com.sendspinlite.SendspinApplication"
         android:allowBackup="true"
         android:label="Sendspin PCM Player"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -29,7 +29,7 @@
         <!-- Disable Sentry's auto-init ContentProvider; CrashReportingManager controls init -->
         <meta-data android:name="io.sentry.auto-init" android:value="false" />
         <activity
-            android:name=".MainActivity"
+            android:name="com.sendspinlite.ui.MainActivity"
             android:exported="true"
             android:attributionTags="media_playback">
             <intent-filter>
@@ -38,23 +38,23 @@
             </intent-filter>
         </activity>
         <service
-            android:name=".SendspinService"
+            android:name="com.sendspinlite.service.SendspinService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback"
             android:attributionTags="media_playback">
         </service>
-        <receiver android:exported="true" android:name="com.sendspinlite.BootReceiver" android:permission="android.permission.RECEIVE_BOOT_COMPLETED" android:attributionTags="media_playback">
+        <receiver android:exported="true" android:name="com.sendspinlite.system.BootReceiver" android:permission="android.permission.RECEIVE_BOOT_COMPLETED" android:attributionTags="media_playback">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".UpdateReceiver" android:exported="false">
+        <receiver android:name="com.sendspinlite.update.UpdateReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".DownloadCompleteReceiver" android:exported="true">
+        <receiver android:name="com.sendspinlite.update.DownloadCompleteReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
             </intent-filter>

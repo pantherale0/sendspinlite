@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.sync
 
 import android.util.Log
 import kotlin.math.abs
@@ -58,8 +58,10 @@ class ClockSync(
     private val adaptiveCutoffFraction: Double = 3.0,
     private val minSamplesBeforeForgetting: Int = 100,
     private val maxErrorScale: Double = 0.5,
+    private val driftSignificanceThreshold: Double = 2.0,
 ) {
     private val tag = "ClockSync"
+    private var useDrift: Boolean = false
 
     // Derived process variance (matches reference: self._process_variance = process_std_dev ** 2)
     private val processVariance: Double = processStdDev * processStdDev
@@ -365,10 +367,16 @@ class ClockSync(
         offsetDriftCovariance = covOffDrift - driftGain * covOff
         offsetCovariance = covOff - offsetGain * covOff
 
-        // Publish snapshot for lock-free reads
+        // Update drift significance flag for time conversion methods
+        // Only apply drift compensation if statistically significant (SNR check)
+        val driftSquared = drift * drift
+        useDrift = driftSquared > (driftSignificanceThreshold * driftSignificanceThreshold) * driftCovariance.coerceAtLeast(0.0)
+
+        // Publish snapshot for lock-free reads using effective drift
+        val effectiveDrift = if (useDrift) drift else 0.0
         currentTimeElement =
             TimeElement(
-                lastUpdate = lastUpdateUs, offset = offset, drift = drift,
+                lastUpdate = lastUpdateUs, offset = offset, drift = effectiveDrift,
             )
 
         lastMeasurementUs = measurement.toDouble()
@@ -509,6 +517,7 @@ class ClockSync(
     fun reset() {
         offset = 0.0
         drift = 0.0
+        useDrift = false
         lastUpdateUs = 0
         updateCount = 0
         baselineOffsetUs = null

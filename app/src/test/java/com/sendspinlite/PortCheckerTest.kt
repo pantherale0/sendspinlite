@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.Test
 import java.util.concurrent.Executors
+import com.sendspinlite.network.PortChecker
 import java.util.concurrent.atomic.AtomicReference
 
 class PortCheckerTest {

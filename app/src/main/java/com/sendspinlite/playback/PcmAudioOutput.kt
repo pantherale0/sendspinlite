@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.playback
 
 import android.content.Context
 import android.content.pm.PackageManager
@@ -47,6 +47,7 @@ class PcmAudioOutput {
     private val totalFramesWritten = AtomicLong(0L)
     private var playbackHeadRaw: Long = 0L
     private var playbackHeadWraps: Long = 0L
+    @Volatile
     private var smoothedLatencyUs: Long = 0L
 
     // Current playback speed
