@@ -93,12 +93,18 @@ class SendspinProtocolHandler(
 
                     val controller = payload.optJSONObject("controller")
                     if (controller != null) {
-                        controllerVolume = controller.optInt("volume", 100)
-                        controllerMuted = controller.optBoolean("muted", false)
-                        supportedCommands =
-                            controller.optJSONArray("supported_commands")?.let { arr ->
-                                (0 until arr.length()).map { arr.getString(it) }.toSet()
-                            } ?: emptySet()
+                        if (controller.has("volume") && !controller.isNull("volume")) {
+                            controllerVolume = controller.optInt("volume")
+                        }
+                        if (controller.has("muted") && !controller.isNull("muted")) {
+                            controllerMuted = controller.optBoolean("muted")
+                        }
+                        if (controller.has("supported_commands")) {
+                            supportedCommands =
+                                controller.optJSONArray("supported_commands")?.let { arr ->
+                                    (0 until arr.length()).map { arr.getString(it) }.toSet()
+                                }
+                        }
                     }
 
                     val metadata = payload.optJSONObject("metadata")
