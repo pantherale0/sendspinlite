@@ -5,11 +5,13 @@ import com.google.common.truth.Truth.assertThat
 import com.sendspinlite.update.UpdateReceiver
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class UpdateReceiverTest {
     @Test
     fun packageReplaced_relaunchesLauncherInFreshTask() {
