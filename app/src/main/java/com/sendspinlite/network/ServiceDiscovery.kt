@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.network
 
 import android.content.Context
 import android.net.nsd.NsdManager

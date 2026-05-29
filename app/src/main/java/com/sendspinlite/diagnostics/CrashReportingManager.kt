@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.diagnostics
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -16,6 +16,8 @@ import io.sentry.android.core.SentryAndroidOptions
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
+import com.sendspinlite.BuildConfig
+import com.sendspinlite.SendspinApplication
 import java.util.Locale
 
 /**

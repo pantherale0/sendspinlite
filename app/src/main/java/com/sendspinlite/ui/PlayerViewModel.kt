@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.ui
 
 import android.app.Application
 import android.content.ComponentName
@@ -14,16 +14,20 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import com.sendspinlite.diagnostics.CrashReportingManager
+import com.sendspinlite.network.DiscoveredServer
+import com.sendspinlite.network.ServiceDiscovery
+import com.sendspinlite.playback.PlaybackDiagnostics
+import com.sendspinlite.service.SendspinService
+import com.sendspinlite.update.AutoUpdateManager
 import kotlinx.coroutines.launch
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val PREFS_NAME = "SendspinPlayerPrefs"
         private const val KEY_WS_URL = "ws_url"
-        private const val KEY_ENABLE_OPUS_CODEC = "enable_opus_codec"
         private const val KEY_STATIC_DELAY_MS = "static_delay_ms"
         private const val DEFAULT_CLIENT_ID = "android-id"
-        private const val DEFAULT_ENABLE_OPUS_CODEC = false
         private const val DEFAULT_STATIC_DELAY_MS = 0L
     }
 
@@ -124,7 +128,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val audibleSyncCount: Long = 0,
         // Number of Kalman filter anomalies detected
         val kalmanErrorCount: Long = 0,
-        val enableOpusCodec: Boolean = DEFAULT_ENABLE_OPUS_CODEC,
         val hasController: Boolean = false,
         val groupVolume: Int = 100,
         val groupMuted: Boolean = false,
@@ -169,7 +172,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val lateRestartLoops: Int = 0,
         val effectiveBufferAheadMs: Long = 0,
         val estimatedOffsetMs: Long = 0,
-        val decodeLatencyMs: Long = 0,
         val playoutOffsetMs: Long = 0,
         val networkJitterMs: Long = 0,
         val clockUpdateCount: Int = 0,
@@ -273,16 +275,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // Load saved settings from SharedPreferences
         val savedWsUrl = sharedPrefs.getString(KEY_WS_URL, null)
-        val savedEnableOpusCodec = sharedPrefs.getBoolean(KEY_ENABLE_OPUS_CODEC, DEFAULT_ENABLE_OPUS_CODEC)
         val savedStaticDelayMs = sharedPrefs.getLong(KEY_STATIC_DELAY_MS, DEFAULT_STATIC_DELAY_MS)
-
-        // Initialize with saved URL and Opus codec preference if available
+        // Initialize with saved URL if available
         _ui.value =
             _ui.value.copy(
                 wsUrl = savedWsUrl ?: "",
                 clientId = deviceId,
                 clientName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
-                enableOpusCodec = savedEnableOpusCodec,
                 staticDelayMs = savedStaticDelayMs,
             )
 
@@ -364,13 +363,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
         _ui.value = _ui.value.copy(connected = false, status = "disconnected")
     }
-
-    fun setEnableOpusCodec(enabled: Boolean) {
-        // Save to SharedPreferences for persistence
-        sharedPrefs.edit().putBoolean(KEY_ENABLE_OPUS_CODEC, enabled).apply()
-        service?.setEnableOpusCodec(enabled)
-    }
-
     fun setStaticDelayMs(ms: Long) {
         val clamped = ms.coerceIn(0L, 5000L)
         // Save to SharedPreferences for persistence

@@ -2,6 +2,8 @@ package com.sendspinlite
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Before
+import com.sendspinlite.playback.AudioJitterBuffer
+import com.sendspinlite.sync.ClockSync
 import org.junit.Test
 
 class AudioJitterBufferTest {

@@ -1,6 +1,7 @@
-package com.sendspinlite
+package com.sendspinlite.playback
 
 import java.util.PriorityQueue
+import com.sendspinlite.sync.ClockSync
 import java.util.concurrent.atomic.AtomicLong
 
 class AudioJitterBuffer(private val clockSync: ClockSync) {

@@ -2,6 +2,7 @@ package com.sendspinlite
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
+import com.sendspinlite.diagnostics.lastLines
 
 class ReportingUtilsTest {
     @Test

@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.network
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException

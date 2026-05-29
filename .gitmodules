@@ -1,0 +1,6 @@
+[submodule "spec"]
+	path = spec
+	url = https://github.com/sendspin/spec
+[submodule "time-filter"]
+	path = time-filter
+	url = https://github.com/sendspin/time-filter

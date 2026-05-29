@@ -93,14 +93,10 @@ dependencies {
     // JSON library supports API 24+
     implementation("org.json:json:20231013")
 
-    // Concentus library
-    implementation("io.github.jaredmdobson:concentus:1.0.2")
-
     // Sentry Android SDK — opt-in crash and ANR reporting
     implementation("io.sentry:sentry-android:8.14.0")
 
-    // FLAC support can be added later with proper library selection
-    // Currently supporting: Opus (via Concentus) and PCM
+    // Currently supporting: PCM
 
     // androidx.media 1.6.0+ has ashmem pinning fixes and supports API 14+
     implementation("androidx.media:media:1.6.0")

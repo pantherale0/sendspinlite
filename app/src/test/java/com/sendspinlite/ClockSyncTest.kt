@@ -1,6 +1,7 @@
 package com.sendspinlite
 
 import com.google.common.truth.Truth.assertThat
+import com.sendspinlite.sync.ClockSync
 import org.junit.Test
 
 class ClockSyncTest {

@@ -1,4 +1,4 @@
-package com.sendspinlite
+package com.sendspinlite.update
 
 import android.content.BroadcastReceiver
 import android.content.Context
