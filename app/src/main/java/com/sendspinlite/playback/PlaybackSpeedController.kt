@@ -33,6 +33,7 @@ class PlaybackSpeedController(
      */
     fun adjustSpeed(nowUs: Long): Boolean {
         if (output.isStarted()) {
+            if (outputStartedAtUs == 0L) return false
             val snapshot = jitter.snapshot()
             val rawAheadMs = snapshot.bufferAheadMs.toDouble()
 
