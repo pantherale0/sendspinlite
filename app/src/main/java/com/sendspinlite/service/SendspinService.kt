@@ -23,6 +23,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.takeWhile
 import com.sendspinlite.client.ClientEvent
 import com.sendspinlite.client.SendspinPcmClient
 import com.sendspinlite.ui.MainActivity
