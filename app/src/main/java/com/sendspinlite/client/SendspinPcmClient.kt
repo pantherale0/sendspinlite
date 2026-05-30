@@ -811,12 +811,15 @@ class SendspinPcmClient(
             return false
         }
 
+        val pipelineLatencyMs = output.getEstimatedPipelineLatencyUs() / 1000L
+
         // Prevent deadlock when head is late (negative ahead) by dropping late chunks now.
-        if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < RESTART_DROP_TRIGGER_AHEAD_MS) {
+        val activeRestartDropTriggerAheadMs = pipelineLatencyMs + RESTART_DROP_TRIGGER_AHEAD_MS
+        if (snapshot.queuedChunks > 0 && snapshot.bufferAheadMs < activeRestartDropTriggerAheadMs) {
             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_CATCHUP
-            val targetAheadMs = if (forceResyncMode) RESYNC_MIN_BUFFER_MS else MIN_BUFFER_MS
+            val targetAheadMs = if (forceResyncMode) pipelineLatencyMs + RESYNC_MIN_BUFFER_MS else pipelineLatencyMs + MIN_BUFFER_MS
             // Always trim to the start window; lateness-based drop can leave
-            // the head outside force-resync (-10..90ms).
+            // the head outside force-resync.
             val dropped = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
             if (dropped > 0) {
                 val nowMs = System.currentTimeMillis()
@@ -837,7 +840,7 @@ class SendspinPcmClient(
             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_FORCE_RESYNC_PRESTART
             // While recovering from audioserver death, drop stale audio more aggressively
             // so we rejoin the live timeline quickly.
-            val targetAheadMs = RESYNC_MIN_BUFFER_MS
+            val targetAheadMs = pipelineLatencyMs + RESYNC_MIN_BUFFER_MS
             val dropped = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
             if (dropped > 0) {
                 val nowMs = System.currentTimeMillis()
@@ -852,9 +855,10 @@ class SendspinPcmClient(
         }
 
         // Large prestart backlog with a nearly-live head: trim to the start window in one pass.
-        if (snap2.queuedChunks >= PRESTART_BACKLOG_CHUNK_THRESHOLD && snap2.bufferAheadMs < RESTART_MIN_AHEAD_MS) {
+        val activeRestartMinAheadMs = pipelineLatencyMs + RESTART_MIN_AHEAD_MS
+        if (snap2.queuedChunks >= PRESTART_BACKLOG_CHUNK_THRESHOLD && snap2.bufferAheadMs < activeRestartMinAheadMs) {
             playbackRecoveryStatus = PlaybackDiagnostics.STATUS_PRESTART_BACKLOG_TRIM
-            val targetAheadMs = if (forceResyncMode) RESYNC_MIN_BUFFER_MS else MIN_BUFFER_MS
+            val targetAheadMs = if (forceResyncMode) pipelineLatencyMs + RESYNC_MIN_BUFFER_MS else pipelineLatencyMs + MIN_BUFFER_MS
             val trimmed = jitter.dropUntilHeadAheadAtLeast(nowUs(), targetAheadMs)
             if (trimmed > 0) {
                 val nowMs = System.currentTimeMillis()
@@ -874,10 +878,10 @@ class SendspinPcmClient(
         // Chunks will actually be needed playoutOffsetUs in the future (negative offset = sooner)
         val effectiveBufferAheadMs = snapForStart.bufferAheadMs + (playoutOffsetUs / 1000L)
 
-        val startMinMs = if (forceResyncMode) RESYNC_MIN_BUFFER_MS else MIN_BUFFER_MS
-        val startMaxMs = if (forceResyncMode) RESYNC_MAX_START_AHEAD_MS else MAX_START_AHEAD_MS
-        val discontinuityStartMinMs = -80L
-        val discontinuityStartMaxMs = 250L
+        val startMinMs = if (forceResyncMode) pipelineLatencyMs + RESYNC_MIN_BUFFER_MS else pipelineLatencyMs + MIN_BUFFER_MS
+        val startMaxMs = if (forceResyncMode) pipelineLatencyMs + RESYNC_MAX_START_AHEAD_MS else pipelineLatencyMs + MAX_START_AHEAD_MS
+        val discontinuityStartMinMs = pipelineLatencyMs - 80L
+        val discontinuityStartMaxMs = pipelineLatencyMs + 250L
         val activeStartMinMs =
             if (inDiscontinuityMode) discontinuityStartMinMs else startMinMs
         val activeStartMaxMs =
@@ -890,7 +894,7 @@ class SendspinPcmClient(
 
         // Recovery path: when network handoff leaves us perpetually late, don't deadlock.
         // Start anyway after ~1s of late restarts and let catch-up/drop logic recover.
-        if (!canStartNormally && snapForStart.queuedChunks >= RESTART_MIN_QUEUED && snapForStart.bufferAheadMs < RESTART_MIN_AHEAD_MS) {
+        if (!canStartNormally && snapForStart.queuedChunks >= RESTART_MIN_QUEUED && snapForStart.bufferAheadMs < activeRestartMinAheadMs) {
             lateRestartLoops++
         } else if (canStartNormally) {
             // Do not reset the counter when ahead oscillates around restartMinAheadMs
@@ -901,10 +905,10 @@ class SendspinPcmClient(
         // If we remain late for a while, allow bounded late-start recovery instead of
         // endless prestart dropping (which can deadlock playback on constrained devices).
         val canStartLateRecovery =
-            lateRestartLoops >= 20 && snapForStart.bufferAheadMs >= -50L
+            lateRestartLoops >= 20 && snapForStart.bufferAheadMs >= (pipelineLatencyMs - 50L)
 
         val forceLateStart =
-            lateRestartLoops >= FORCE_START_AFTER_LOOPS && snapForStart.bufferAheadMs >= -40L
+            lateRestartLoops >= FORCE_START_AFTER_LOOPS && snapForStart.bufferAheadMs >= (pipelineLatencyMs - 40L)
         val canStart = canStartNormally || canStartLateRecovery || forceLateStart
 
         if (canStart) {
