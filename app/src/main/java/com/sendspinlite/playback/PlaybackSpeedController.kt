@@ -54,8 +54,18 @@ class PlaybackSpeedController(
                 (nowUs - outputStartedAtUs) < startupBoostDurationUs
 
             // During startup, if the buffer error exceeds the hard correction threshold,
-            // signal the caller to perform an instant correction instead of gradual speed bend
-            if (inStartupPhase && kotlin.math.abs(bufferErrorMs) > hardCorrectionThresholdMs) {
+            // signal the caller to perform an instant correction instead of gradual speed bend.
+            // On high-latency deep-buffer devices, the baseline target latency is large (e.g. 400ms+),
+            // and the jitter buffer needs room at startup to catch up before triggering hard correction.
+            // Dynamically scale the threshold to maxOf(hardCorrectionThresholdMs, targetAheadMs * 0.4)
+            // to allow the proportional controller time to adapt without deadlocking.
+            val activeHardCorrectionThresholdMs = if (targetAheadMs > 200.0) {
+                maxOf(hardCorrectionThresholdMs, targetAheadMs * 0.4)
+            } else {
+                hardCorrectionThresholdMs
+            }
+
+            if (inStartupPhase && kotlin.math.abs(bufferErrorMs) > activeHardCorrectionThresholdMs) {
                 return true // Request hard correction
             }
 

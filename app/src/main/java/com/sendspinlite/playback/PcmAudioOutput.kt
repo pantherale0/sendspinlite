@@ -100,20 +100,24 @@ class PcmAudioOutput {
 
             require(bitDepth in listOf(16, 24, 32)) { "Unsupported bit depth: $bitDepth. Must be 16, 24, or 32-bit PCM" }
 
-            val channelMask = channelMaskFor(channels)
-            val encoding = encodingFor(bitDepth)
-
-            // Ensure valid sample rate
-            val safeSampleRate = sampleRate.coerceAtLeast(4000)
-
             val format =
-                AudioFormat.Builder()
-                    .setEncoding(encoding)
-                    .setSampleRate(safeSampleRate)
-                    .setChannelMask(channelMask)
-                    .build()
+                PcmFormatSupport.buildPlaybackFormat(sampleRate, channels, bitDepth)
+                    ?: run {
+                        Log.e(tag, "Unsupported PCM format sr=$sampleRate ch=$channels bd=$bitDepth")
+                        started.set(false)
+                        track = null
+                        return
+                    }
 
-            val minBuf = AudioTrack.getMinBufferSize(safeSampleRate, channelMask, encoding)
+            val safeSampleRate = format.sampleRate
+            val minBuf =
+                PcmFormatSupport.getMinBufferSizeIfSupported(sampleRate, channels, bitDepth)
+            if (minBuf <= 0) {
+                Log.e(tag, "Unsupported PCM format sr=$safeSampleRate ch=$channels bd=$bitDepth")
+                started.set(false)
+                track = null
+                return
+            }
             lastMinBufBytes = minBuf
             val bytesPerFrame = channels * (bitDepth / 8)
 
@@ -124,8 +128,19 @@ class PcmAudioOutput {
             // Safeguard minBuf: if HAL returns invalid or tiny value, use a solid 100ms baseline
             val safeMinBuf = maxOf(minBuf, buffer100ms)
 
-            // Use at least 250ms buffer, or 4x safeMinBuf, whichever is larger, to ensure stability
-            val bufferBytes = maxOf(safeMinBuf * 4, buffer250ms)
+            // Calculate minimum buffer duration to detect devices with naturally large buffers.
+            // On high-latency devices (e.g. Snapdragon MSM8916, where minBuf is 80ms+), using a 4x multiplier
+            // inflates the buffer to 400ms+ and forces the Android OS deep-buffer playback path, causing massive
+            // hardware latency. Using a smaller 2x multiplier for these prevents triggering deep-buffer routing.
+            val minBufMs = if (safeSampleRate > 0 && bytesPerFrame > 0) {
+                (minBuf.toLong() * 1000L) / (safeSampleRate.toLong() * bytesPerFrame)
+            } else {
+                0L
+            }
+            val multiplier = if (minBufMs > 40L) 2 else 4
+
+            // Use at least 250ms buffer, or multiplier * safeMinBuf, whichever is larger, to ensure stability
+            val bufferBytes = maxOf(safeMinBuf * multiplier, buffer250ms)
 
             val attrs =
                 AudioAttributes.Builder()
@@ -683,65 +698,11 @@ class PcmAudioOutput {
     }
 
     private fun isNativePcmFormatSupported(format: PcmFormat): Boolean {
-        return try {
-            val safeRate = format.sampleRate.coerceAtLeast(4000)
-            val channelMask = channelMaskFor(format.channels)
-            val encoding = encodingFor(format.bitDepth)
-            val minBuf = AudioTrack.getMinBufferSize(safeRate, channelMask, encoding)
-            if (minBuf <= 0) return false
-
-            val bytesPerFrame = format.channels * (format.bitDepth / 8)
-            if (bytesPerFrame <= 0) return false
-
-            // Enforce minimum 100ms floor during format probing to prevent initialization failures on misconfigured HALs
-            val safeMinProbeBytes = (safeRate * 0.10 * bytesPerFrame).toInt()
-            val probeBufferBytes = maxOf(minBuf * 2, safeMinProbeBytes, bytesPerFrame * 1024)
-
-            val formatObj =
-                AudioFormat.Builder()
-                    .setEncoding(encoding)
-                    .setSampleRate(safeRate)
-                    .setChannelMask(channelMask)
-                    .build()
-
-            val attrs =
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-
-            val probeTrack =
-                AudioTrack(
-                    attrs,
-                    formatObj,
-                    probeBufferBytes,
-                    AudioTrack.MODE_STREAM,
-                    AudioManager.AUDIO_SESSION_ID_GENERATE,
-                )
-
-            val ok = probeTrack.state == AudioTrack.STATE_INITIALIZED
-            try {
-                probeTrack.release()
-            } catch (_: Exception) {
-            }
-            ok
-        } catch (_: Throwable) {
-            false
-        }
+        return PcmFormatSupport.isPlaybackFormatSupported(
+            format.sampleRate,
+            format.channels,
+            format.bitDepth,
+        )
     }
 
-    private fun channelMaskFor(channels: Int): Int =
-        when (channels) {
-            1 -> AudioFormat.CHANNEL_OUT_MONO
-            2 -> AudioFormat.CHANNEL_OUT_STEREO
-            else -> error("Unsupported channel count: $channels")
-        }
-
-    private fun encodingFor(bitDepth: Int): Int =
-        when (bitDepth) {
-            16 -> AudioFormat.ENCODING_PCM_16BIT
-            24 -> AudioFormat.ENCODING_PCM_24BIT_PACKED
-            32 -> AudioFormat.ENCODING_PCM_32BIT
-            else -> error("Unsupported bit depth: $bitDepth")
-        }
 }

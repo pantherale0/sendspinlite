@@ -1,23 +1,12 @@
 package com.sendspinlite.protocol
 
+import com.sendspinlite.playback.PcmFormatSupport
 import org.json.JSONArray
 import org.json.JSONObject
 
 object SendspinPayloadFactory {
     private fun isBitDepthSupported(sampleRate: Int, bitDepth: Int): Boolean {
-        return try {
-            val encoding = when (bitDepth) {
-                16 -> android.media.AudioFormat.ENCODING_PCM_16BIT
-                24 -> android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED
-                32 -> android.media.AudioFormat.ENCODING_PCM_32BIT
-                else -> return false
-            }
-            val channelMask = android.media.AudioFormat.CHANNEL_OUT_STEREO
-            val minBuf = android.media.AudioTrack.getMinBufferSize(sampleRate, channelMask, encoding)
-            minBuf > 0
-        } catch (_: Throwable) {
-            false
-        }
+        return PcmFormatSupport.isPlaybackFormatSupported(sampleRate, channels = 2, bitDepth)
     }
 
     fun buildPlayerSupportObject(): JSONObject {
