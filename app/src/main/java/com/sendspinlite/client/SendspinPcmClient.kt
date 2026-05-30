@@ -449,10 +449,12 @@ class SendspinPcmClient(
         Log.i(tag, "DIAG: $entry")
     }
 
-    private fun isClockReadyForPlayback(): Boolean =
-        clock.hasConverged() &&
-            clock.getOffsetUncertaintyUs() <= MAX_CLOCK_UNCERTAINTY_FOR_START_US &&
+    private fun isClockReadyForPlayback(): Boolean {
+        val maxUncertainty = maxOf(MAX_CLOCK_UNCERTAINTY_FOR_START_US, clock.getAverageRttUs() / 2)
+        return clock.hasConverged() &&
+            clock.getOffsetUncertaintyUs() <= maxUncertainty &&
             clock.getAverageRttUs() <= MAX_RTT_FOR_START_US
+    }
 
     private fun publishPlaybackDiagnostics(
         snapshot: AudioJitterBuffer.Snapshot,

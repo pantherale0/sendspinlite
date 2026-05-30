@@ -282,7 +282,7 @@ class ClockSync(
                 // After 8 measurements, we have a stable offset baseline
                 // Initialize Kalman covariance matrix for full filter
                 offsetCovariance = offsetCovariance.coerceAtLeast(100.0) // Measurement uncertainty
-                driftCovariance = 1.0 // Start learning drift
+                driftCovariance = 1e-10 // Start learning drift (10 ppm initial uncertainty)
                 offsetDriftCovariance = 0.0
                 drift = 0.0 // Start drift estimation from zero
 
@@ -360,7 +360,7 @@ class ClockSync(
 
         // State update
         offset = predictedOffset + offsetGain * residual
-        drift += driftGain * residual
+        drift = (drift + driftGain * residual).coerceIn(-0.001, 0.001)
 
         // Covariance update
         driftCovariance = covDrift - driftGain * covOffDrift
