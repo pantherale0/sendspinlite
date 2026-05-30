@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,9 +33,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import com.sendspinlite.BuildConfig
+import com.sendspinlite.R
 import com.sendspinlite.diagnostics.AudioIssueReporter
 import com.sendspinlite.diagnostics.CrashReportingManager
 import com.sendspinlite.playback.PlaybackDiagnostics
+import com.sendspinlite.system.SendspinSystemUtils
 import java.util.*
 
 class MainActivity : ComponentActivity() {
@@ -61,23 +62,23 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.RequestPermission(),
         ) { /* result handled implicitly — CrashReportingManager checks at write time */ }
 
-    // Launched after the user opts in to auto-install updates (Android 8+ only).
-    // The system shows an "Allow from this source" settings screen; the result is ignored
-    // because canRequestPackageInstalls() is checked again at download time.
-    private val installPermissionLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult(),
-        ) { /* result checked via canRequestPackageInstalls() at download time */ }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Ensure system bars remain visible and don't draw behind them
         WindowCompat.setDecorFitsSystemWindows(window, true)
 
-        // Check if we need to show battery optimization warning (only on first launch)
+        // Request battery optimization exemption on first launch (Android 6+)
         val prefs = getSharedPreferences("SendspinPlayerPrefs", MODE_PRIVATE)
         val shownBatteryWarning = prefs.getBoolean("shown_battery_optimization_warning", false)
+        if (
+            !shownBatteryWarning &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !SendspinSystemUtils.isBatteryOptimizationIgnored(this)
+        ) {
+            SendspinSystemUtils.requestBatteryOptimizationExemption(this)
+            prefs.edit { putBoolean("shown_battery_optimization_warning", true) }
+        }
 
         // Request NEARBY_WIFI_DEVICES permission for mDNS service discovery
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -94,24 +95,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    PlayerScreen(
-                        vm,
-                        showBatteryWarning = !shownBatteryWarning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP,
-                        onRequestInstallPermission = { requestInstallPermission() },
-                    )
+                    PlayerScreen(vm)
                 }
             }
-        }
-    }
-
-    /** Direct the user to the "Allow from this source" settings screen (Android 8+). */
-    private fun requestInstallPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val intent =
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-            installPermissionLauncher.launch(intent)
         }
     }
 
@@ -161,20 +147,11 @@ internal fun Throwable.isAndroidTopOfTaskResumeFailure(): Boolean =
         stackTrace.any { it.className == "android.app.Activity" && it.methodName == "isTopOfTask" }
 
 @Composable
-private fun PlayerScreen(
-    vm: PlayerViewModel,
-    showBatteryWarning: Boolean = false,
-    onRequestInstallPermission: () -> Unit = {},
-) {
+private fun PlayerScreen(vm: PlayerViewModel) {
     val ui by vm.ui.collectAsState()
     val discoveredServers by vm.discoveredServers.collectAsState()
     val crashReportingEnabled by vm.crashReportingEnabled.collectAsState()
-    val updateInfo by vm.updateInfo.collectAsState()
-    val autoUpdateEnabled by vm.autoUpdateEnabled.collectAsState()
     val scrollState = rememberScrollState()
-    var showBatteryDialog by remember { mutableStateOf(showBatteryWarning) }
-    // Show auto-update prompt on first launch (if user hasn't been asked yet).
-    var showAutoUpdateDialog by remember { mutableStateOf(!vm.hasAskedAboutAutoUpdate) }
 
     // State for title tap counter (5 taps to export logs)
     var titleTapCount by remember { mutableStateOf(0) }
@@ -490,51 +467,6 @@ private fun PlayerScreen(
             )
         }
 
-        // Battery optimization warning dialog (Android 12+)
-        if (showBatteryDialog) {
-            val context = LocalContext.current
-            AlertDialog(
-                onDismissRequest = { showBatteryDialog = false },
-                title = { Text("Disable Battery Optimization") },
-                text = {
-                    Text(
-                        "To prevent the app from being stopped by battery optimization, " +
-                            "please disable battery optimization for Sendspin Lite in your device settings.\n\n" +
-                            "Tap 'Open Settings' below to go to the battery optimization screen.",
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            // Open battery optimization settings
-                            val intent =
-                                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            context.startActivity(intent)
-                            // Update prefs to prevent showing again
-                            context.getSharedPreferences(
-                                "SendspinPlayerPrefs",
-                                ComponentActivity.MODE_PRIVATE,
-                            )
-                                .edit {
-                                    putBoolean("shown_battery_optimization_warning", true)
-                                }
-                            showBatteryDialog = false
-                        },
-                    ) {
-                        Text("Open Settings")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showBatteryDialog = false },
-                    ) {
-                        Text("Dismiss")
-                    }
-                },
-            )
-        }
-
         // Export logs dialog
         if (showExportDialog) {
             AlertDialog(
@@ -763,117 +695,6 @@ private fun PlayerScreen(
                     }
                 },
             )
-        }
-
-        // Auto-update first-launch dialog
-        if (showAutoUpdateDialog) {
-            AlertDialog(
-                onDismissRequest = {
-                    vm.markAutoUpdateAsked()
-                    showAutoUpdateDialog = false
-                },
-                title = { Text("Automatic Updates") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "Would you like Sendspin Lite to automatically check for updates weekly " +
-                                "and download them in the background?",
-                        )
-                        Text(
-                            "If you choose \"Enable Auto-Install\", the app will need permission to " +
-                                "install packages on this device. Choosing \"Just Notify Me\" requires no " +
-                                "extra permissions — the app will show a banner when a new version is available.",
-                            style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            vm.setAutoUpdateEnabled(true)
-                            showAutoUpdateDialog = false
-                            // On Android 8+ direct the user to allow installs from this source.
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                                !context.packageManager.canRequestPackageInstalls()
-                            ) {
-                                onRequestInstallPermission()
-                            }
-                        },
-                    ) {
-                        Text("Enable Auto-Install")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            // Notify only – no install permission required.
-                            vm.markAutoUpdateAsked()
-                            showAutoUpdateDialog = false
-                        },
-                    ) {
-                        Text("Just Notify Me")
-                    }
-                },
-            )
-        }
-
-        // Update available banner
-        updateInfo?.let { info ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = 4.dp,
-                backgroundColor = MaterialTheme.colors.primaryVariant,
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Update Available: ${info.tagName}",
-                        style = MaterialTheme.typography.subtitle1,
-                        color = MaterialTheme.colors.onPrimary,
-                    )
-                    if (info.apkUrl != null) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { vm.downloadUpdate(info) },
-                                colors =
-                                    ButtonDefaults.buttonColors(
-                                        backgroundColor = MaterialTheme.colors.onPrimary,
-                                        contentColor = MaterialTheme.colors.primaryVariant,
-                                    ),
-                            ) {
-                                Text("Download & Install")
-                            }
-                            TextButton(onClick = { vm.dismissUpdate() }) {
-                                Text(
-                                    "Dismiss",
-                                    color = MaterialTheme.colors.onPrimary,
-                                )
-                            }
-                        }
-                    } else {
-                        // No APK attached – direct user to the release page.
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(
-                                onClick = {
-                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(info.releaseUrl))
-                                    context.startActivity(browserIntent)
-                                },
-                            ) {
-                                Text(
-                                    "View Release",
-                                    color = MaterialTheme.colors.onPrimary,
-                                )
-                            }
-                            TextButton(onClick = { vm.dismissUpdate() }) {
-                                Text(
-                                    "Dismiss",
-                                    color = MaterialTheme.colors.onPrimary,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         // Connection Status
@@ -1120,37 +941,27 @@ private fun PlayerScreen(
 
                 Divider(modifier = Modifier.padding(vertical = 4.dp))
 
-                // Auto-update toggle
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                Text(
+                    text = "App Updates",
+                    style = MaterialTheme.typography.body2,
+                )
+                Text(
+                    text = "Version ${BuildConfig.VERSION_NAME}. Track GitHub release updates with Obtainium.",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                )
+                Button(
+                    onClick = {
+                        SendspinSystemUtils.openExternalUrl(
+                            context = context,
+                            url = context.getString(R.string.obtainium_app_url),
+                            failureMessage = "Could not open the Obtainium import link.",
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Auto-Install Updates",
-                            style = MaterialTheme.typography.body2,
-                        )
-                        Text(
-                            text = "Automatically download and install new releases from GitHub",
-                            style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
-                        )
-                    }
-                    Switch(
-                        checked = autoUpdateEnabled,
-                        onCheckedChange = { enabled ->
-                            vm.setAutoUpdateEnabled(enabled)
-                            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                                !context.packageManager.canRequestPackageInstalls()
-                            ) {
-                                onRequestInstallPermission()
-                            }
-                        },
-                    )
+                    Text("Follow Updates with Obtainium")
                 }
             }
         }

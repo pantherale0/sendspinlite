@@ -19,7 +19,6 @@ import com.sendspinlite.network.DiscoveredServer
 import com.sendspinlite.network.ServiceDiscovery
 import com.sendspinlite.playback.PlaybackDiagnostics
 import com.sendspinlite.service.SendspinService
-import com.sendspinlite.update.AutoUpdateManager
 import kotlinx.coroutines.launch
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
@@ -29,58 +28,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_STATIC_DELAY_MS = "static_delay_ms"
         private const val DEFAULT_CLIENT_ID = "android-id"
         private const val DEFAULT_STATIC_DELAY_MS = 0L
-    }
-
-    // -------------------------------------------------------------------------
-    // Auto-update state
-    // -------------------------------------------------------------------------
-
-    private val _updateInfo = MutableStateFlow<AutoUpdateManager.UpdateInfo?>(null)
-
-    /** Non-null when a newer version has been found on GitHub. */
-    val updateInfo: StateFlow<AutoUpdateManager.UpdateInfo?> = _updateInfo
-
-    private val _autoUpdateEnabled = MutableStateFlow(AutoUpdateManager.isAutoUpdateEnabled(app))
-
-    /** Whether the user has opted in to auto-downloading and installing updates. */
-    val autoUpdateEnabled: StateFlow<Boolean> = _autoUpdateEnabled
-
-    /** Returns whether the first-launch auto-update prompt has already been shown. */
-    val hasAskedAboutAutoUpdate: Boolean
-        get() = AutoUpdateManager.hasAskedAboutAutoUpdate(getApplication())
-
-    /** Save the user's auto-update preference and optionally trigger an immediate check. */
-    fun setAutoUpdateEnabled(enabled: Boolean) {
-        AutoUpdateManager.setAutoUpdateEnabled(getApplication(), enabled)
-        _autoUpdateEnabled.value = enabled
-        // Trigger an update check immediately when the user opts in or re-enables.
-        if (enabled) {
-            viewModelScope.launch { performUpdateCheck() }
-        }
-    }
-
-    /** Mark the first-launch prompt as having been shown without enabling auto-install. */
-    fun markAutoUpdateAsked() {
-        AutoUpdateManager.markAutoUpdateAsked(getApplication())
-    }
-
-    /** Dismiss the current update banner (does not disable future checks). */
-    fun dismissUpdate() {
-        _updateInfo.value = null
-    }
-
-    /** Start the APK download for the pending update via DownloadManager. */
-    fun downloadUpdate(updateInfo: AutoUpdateManager.UpdateInfo) {
-        AutoUpdateManager.startDownload(getApplication(), updateInfo)
-    }
-
-    private suspend fun performUpdateCheck() {
-        val info = AutoUpdateManager.checkForUpdate(getApplication())
-        _updateInfo.value = info
-        // Auto-start download when auto-install is enabled and an APK URL is available.
-        if (info != null && AutoUpdateManager.isAutoUpdateEnabled(getApplication()) && info.apkUrl != null) {
-            AutoUpdateManager.startDownload(getApplication(), info)
-        }
     }
 
     private val sharedPrefs: SharedPreferences = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -316,10 +263,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        // Check for updates on startup if it has been at least 7 days since the last check.
-        if (AutoUpdateManager.shouldCheckForUpdate(getApplication())) {
-            viewModelScope.launch { performUpdateCheck() }
-        }
     }
 
     override fun onCleared() {

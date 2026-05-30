@@ -23,7 +23,6 @@ graph TD
     Playback[com.sendspinlite.playback - Playout, JitterBuffer, Output]
     Protocol[com.sendspinlite.protocol - JSON SerDe & Handlers]
     Network[com.sendspinlite.network - mDNS & Port Verification]
-    Update[com.sendspinlite.update - GitHub Auto-Updater]
     Diag[com.sendspinlite.diagnostics - Telemetry & Issue Reports]
     Sys[com.sendspinlite.system - OS Flags, Battery & Receivers]
 
@@ -37,7 +36,6 @@ graph TD
     Service --> Network
     UI --> Diag
     Diag --> Sys
-    Update --> Sys
     Root --> Sys
 ```
 
@@ -67,8 +65,6 @@ graph TD
 - **`com.sendspinlite.network`**:
   - `ServiceDiscovery.kt`: Leverages Android's Network Service Discovery (NSD) to resolve `_sendspin-server._tcp.local` servers via mDNS.
   - `PortChecker.kt`: Fast background socket verification tool used to verify server availability before connecting.
-- **`com.sendspinlite.update`**:
-  - `AutoUpdateManager.kt`, `UpdateReceiver.kt`, `DownloadCompleteReceiver.kt`: Manages automated weekly checks, updates, and package install triggers using native `DownloadManager`.
 - **`com.sendspinlite.diagnostics`**:
   - `AudioIssueReporter.kt`: Gathers system telemetries and bundles anonymized playout logs for Sentry diagnostic dumps.
   - `CrashReportingManager.kt` / `ReportingUtils.kt`: Local files used to store unhandled application crash events.

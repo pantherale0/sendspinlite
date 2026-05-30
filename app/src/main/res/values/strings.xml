@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">SendSpinAndroid</string>
     <string name="media_playback_attribution">Media Playback</string>
+    <string name="obtainium_app_url">https://apps.obtainium.imranr.dev/redirect?r=obtainium%3A%2F%2Fapp%2F%7B%22id%22%3A%22com.sendspinlite%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fpantherale0%2Fsendspinlite%22%2C%22author%22%3A%22pantherale0%22%2C%22name%22%3A%22Sendspin%20Lite%22%7D</string>
 </resources>
