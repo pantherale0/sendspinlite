@@ -38,6 +38,7 @@ class SendspinService : Service() {
 
     private var client: SendspinPcmClient? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
     private val _uiState = MutableStateFlow(PlayerViewModel.UiState())
     val uiState: StateFlow<PlayerViewModel.UiState> = _uiState
@@ -170,6 +171,18 @@ class SendspinService : Service() {
                 setReferenceCounted(false)
             }
 
+        // Initialize WifiLock to keep WiFi radio active and prevent low-power DTIM sleep during playback
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        wifiLock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            @Suppress("DEPRECATION")
+            wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SendspinService::WifiLock")
+        } else {
+            @Suppress("DEPRECATION")
+            wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL, "SendspinService::WifiLock")
+        }.apply {
+            setReferenceCounted(false)
+        }
+
         // Register network connectivity receiver
         registerNetworkReceiver()
 
@@ -260,6 +273,14 @@ class SendspinService : Service() {
             }
         }
         wakeLock = null
+
+        // Release wifi lock
+        wifiLock?.let {
+            if (it.isHeld) {
+                it.release()
+            }
+        }
+        wifiLock = null
 
         scope.cancel()
         super.onDestroy()
@@ -433,8 +454,9 @@ class SendspinService : Service() {
 
         disconnect()
 
-        // Acquire wake lock when connecting
+        // Acquire wake lock and wifi lock when connecting
         wakeLock?.acquire()
+        wifiLock?.acquire()
 
         // Start foreground service with retry logic for Android 12+ BOOT_COMPLETED restrictions
         // Use startedFromBoot flag to track if service was initially started from boot context
@@ -669,8 +691,13 @@ class SendspinService : Service() {
         reconnectJob = null
         reconnectRetryCount = 0
 
-        // Release wake lock when disconnecting
+        // Release wake lock and wifi lock when disconnecting
         wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+            }
+        }
+        wifiLock?.let {
             if (it.isHeld) {
                 it.release()
             }
