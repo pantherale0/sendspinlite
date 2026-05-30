@@ -115,12 +115,17 @@ class PcmAudioOutput {
 
             val minBuf = AudioTrack.getMinBufferSize(safeSampleRate, channelMask, encoding)
             lastMinBufBytes = minBuf
-            // Calculate 250ms buffer size
             val bytesPerFrame = channels * (bitDepth / 8)
+
+            // Define minimum baselines (100ms floor for raw minimum buffer, 250ms floor for playback track)
+            val buffer100ms = (safeSampleRate * 0.10 * bytesPerFrame).toInt()
             val buffer250ms = (safeSampleRate * 0.25 * bytesPerFrame).toInt()
 
-            // Use at least 250ms buffer, or 4x minBuf, whichever is larger, to ensure stability
-            val bufferBytes = max(minBuf * 4, buffer250ms)
+            // Safeguard minBuf: if HAL returns invalid or tiny value, use a solid 100ms baseline
+            val safeMinBuf = maxOf(minBuf, buffer100ms)
+
+            // Use at least 250ms buffer, or 4x safeMinBuf, whichever is larger, to ensure stability
+            val bufferBytes = maxOf(safeMinBuf * 4, buffer250ms)
 
             val attrs =
                 AudioAttributes.Builder()
@@ -614,13 +619,12 @@ class PcmAudioOutput {
         val optimalFrames = optimalFramesStr?.toIntOrNull() ?: 256
         val optimalRateStr = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
         val optimalRate = optimalRateStr?.toIntOrNull() ?: 48000
-        val deviceOptimalBuffer = optimalRate / optimalFrames
+        val deviceOptimalBufferMs = (optimalFrames * 1000) / optimalRate
         Log.i(
             tag,
-            "Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBuffer=$deviceOptimalBuffer",
+            "Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBufferMs=$deviceOptimalBufferMs",
         )
         // For now we won't do anything with this, but we can explore adjusting the 250ms HAL buffer based on the deviceOptimalBuffer
-        // This could look like deviceOptimalBuffer*bufferSizing
         // Buffer sizing might need to be dynamic depending on the spec of the device
         // Will put us more at risk of underruns, chunk drops and recovery events via audibleSyncs
         // The app will also be more sensitive to jitter, which can happen at anypoint on the audio pipeline
@@ -689,6 +693,10 @@ class PcmAudioOutput {
             val bytesPerFrame = format.channels * (format.bitDepth / 8)
             if (bytesPerFrame <= 0) return false
 
+            // Enforce minimum 100ms floor during format probing to prevent initialization failures on misconfigured HALs
+            val safeMinProbeBytes = (safeRate * 0.10 * bytesPerFrame).toInt()
+            val probeBufferBytes = maxOf(minBuf * 2, safeMinProbeBytes, bytesPerFrame * 1024)
+
             val formatObj =
                 AudioFormat.Builder()
                     .setEncoding(encoding)
@@ -706,7 +714,7 @@ class PcmAudioOutput {
                 AudioTrack(
                     attrs,
                     formatObj,
-                    max(minBuf * 2, bytesPerFrame * 512),
+                    probeBufferBytes,
                     AudioTrack.MODE_STREAM,
                     AudioManager.AUDIO_SESSION_ID_GENERATE,
                 )
