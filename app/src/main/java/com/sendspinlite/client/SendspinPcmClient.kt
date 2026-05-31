@@ -11,6 +11,7 @@ import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import com.sendspinlite.diagnostics.throwableSummary
 import com.sendspinlite.network.PortChecker
 import com.sendspinlite.playback.AudioJitterBuffer
 import com.sendspinlite.playback.PcmAudioOutput
@@ -326,8 +327,9 @@ class SendspinPcmClient(
                         t: Throwable,
                         response: Response?,
                     ) {
-                        Log.e(tag, "WS failure: ${t.message}", t)
-                        teardown("failure: ${t.message}")
+                        val failureSummary = throwableSummary(t)
+                        Log.e(tag, "WS failure: $failureSummary")
+                        teardown("failure: $failureSummary")
                     }
                 },
             )
