@@ -2,15 +2,7 @@ package com.sendspinlite.client
 
 import android.app.ActivityManager
 import android.content.Context
-import android.net.ConnectivityManager
 import android.util.Log
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
-import okhttp3.*
-import okio.ByteString
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 import com.sendspinlite.diagnostics.throwableSummary
 import com.sendspinlite.network.PortChecker
 import com.sendspinlite.playback.AudioJitterBuffer
@@ -23,13 +15,19 @@ import com.sendspinlite.protocol.SendspinProtocolHandler
 import com.sendspinlite.protocol.SendspinProtocolListener
 import com.sendspinlite.sync.ClockSync
 import com.sendspinlite.system.SendspinSystemUtils
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import okhttp3.*
+import okio.ByteString
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class SendspinPcmClient(
     private val wsUrl: String,
     private val clientId: String,
     private val clientName: String,
-    private val context: android.content.Context,
+    private val context: Context,
 ) : SendspinProtocolListener {
     private val _diagnostics = MutableStateFlow(ClientDiagnostics())
     val diagnostics: StateFlow<ClientDiagnostics> = _diagnostics.asStateFlow()
@@ -706,7 +704,7 @@ class SendspinPcmClient(
             while (isActive && isConnected.get()) {
                 try {
                     val activityManager =
-                        context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? ActivityManager
+                        context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
                     val memInfo = ActivityManager.MemoryInfo()
                     activityManager?.getMemoryInfo(memInfo)
 

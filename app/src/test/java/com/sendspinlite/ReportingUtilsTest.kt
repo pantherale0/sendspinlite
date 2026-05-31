@@ -1,9 +1,9 @@
 package com.sendspinlite
 
 import com.google.common.truth.Truth.assertThat
-import org.junit.Test
 import com.sendspinlite.diagnostics.lastLines
 import com.sendspinlite.diagnostics.throwableSummary
+import org.junit.Test
 
 class ReportingUtilsTest {
     @Test
