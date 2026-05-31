@@ -65,12 +65,27 @@ class SendspinPcmClient(
         private const val RESTART_MIN_QUEUED = 6
         private const val FORCE_START_AFTER_LOOPS = 80
         private const val PRESTART_BACKLOG_CHUNK_THRESHOLD = 60
+        private const val MAX_FAILURE_SUMMARY_MESSAGE_CHARS = 200
 
         // Shared OkHttpClient to avoid leaking thread pools and connection pools on reconnect
         private val sharedOkHttp =
             OkHttpClient.Builder()
                 .pingInterval(30, TimeUnit.SECONDS)
                 .build()
+
+        internal fun summarizeFailureForLog(t: Throwable): String {
+            val type = t.javaClass.simpleName.ifBlank { "Throwable" }
+            val message = t.message ?: return type
+            if (message.isBlank()) return type
+
+            val trimmedMessage =
+                if (message.length > MAX_FAILURE_SUMMARY_MESSAGE_CHARS) {
+                    message.take(MAX_FAILURE_SUMMARY_MESSAGE_CHARS) + "..."
+                } else {
+                    message
+                }
+            return "$type: $trimmedMessage"
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -326,8 +341,9 @@ class SendspinPcmClient(
                         t: Throwable,
                         response: Response?,
                     ) {
-                        Log.e(tag, "WS failure: ${t.message}", t)
-                        teardown("failure: ${t.message}")
+                        val failureSummary = summarizeFailureForLog(t)
+                        Log.e(tag, "WS failure: $failureSummary")
+                        teardown("failure: $failureSummary")
                     }
                 },
             )
