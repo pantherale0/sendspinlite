@@ -52,6 +52,16 @@ class SendspinService : Service() {
     private var reconnectRetryCount = 0
     // Unlimited reconnection attempts - will keep retrying until manually disconnected
 
+    // Per-connection flow collectors. These MUST be cancelled on every disconnect/reconnect,
+    // otherwise each connect() leaks two coroutines that keep the previous SendspinPcmClient
+    // (and its buffers/audio output) reachable forever. Relying solely on a takeWhile() guard
+    // is insufficient: once `client` is reassigned the old client's flows stop emitting, so the
+    // guard never re-evaluates and the collector stays suspended, pinning the dead client in
+    // memory. Under the boot path (background service, repeated health-recovery reconnects) this
+    // accumulates until the heap is exhausted (OOM).
+    private var diagnosticsJob: Job? = null
+    private var eventsJob: Job? = null
+
     // Connection drop tracking
     private var hasEstablishedConnection = false
     private var dropCountedForCurrentOutage = false
@@ -489,8 +499,10 @@ class SendspinService : Service() {
         client = activeClient
         activeClient.setStaticDelayMs(_uiState.value.staticDelayMs)
 
-        // Listen to client diagnostics Flow
-        scope.launch {
+        // Listen to client diagnostics Flow.
+        // Cancel any previous collector first so a reconnect cannot leak the prior client.
+        diagnosticsJob?.cancel()
+        diagnosticsJob = scope.launch {
             activeClient.diagnostics
                 .takeWhile { client === activeClient }
                 .collect { diag ->
@@ -580,8 +592,10 @@ class SendspinService : Service() {
                 }
         }
 
-        // Listen to server events (Volume, Mute, Delay changes)
-        scope.launch {
+        // Listen to server events (Volume, Mute, Delay changes).
+        // Cancel any previous collector first so a reconnect cannot leak the prior client.
+        eventsJob?.cancel()
+        eventsJob = scope.launch {
             activeClient.events
                 .takeWhile { client === activeClient }
                 .collect { event ->
@@ -682,6 +696,14 @@ class SendspinService : Service() {
         }
 
         client = null
+
+        // Cancel the per-connection flow collectors so they release the client they captured.
+        // Without this they remain suspended on the (now silent) flows and pin the client graph
+        // in memory across reconnects, leaking until the heap is exhausted.
+        diagnosticsJob?.cancel()
+        diagnosticsJob = null
+        eventsJob?.cancel()
+        eventsJob = null
 
         // Stop health monitoring when disconnecting
         stopHealthMonitoring()
