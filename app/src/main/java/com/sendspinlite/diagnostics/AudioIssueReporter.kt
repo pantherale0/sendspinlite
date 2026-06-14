@@ -15,10 +15,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import com.sendspinlite.BuildConfig
-import com.sendspinlite.client.SendspinPcmClient
 import com.sendspinlite.playback.PcmAudioOutput
 import com.sendspinlite.playback.PlaybackDiagnostics
-import com.sendspinlite.sync.ClockSync
 import com.sendspinlite.ui.PlayerViewModel
 import java.util.Locale
 
@@ -135,8 +133,8 @@ object AudioIssueReporter {
                 Runtime.getRuntime().exec(
                     arrayOf(
                         "logcat", "-d", "-t", "800",
-                        "SendspinPcmClient:V",
-                        "ClockSync:V",
+                        "SendspinNativeClient:V",
+                        "SendspinJni:V",
                         "PcmAudioOutput:V",
                         "PlayerViewModel:V",
                         "CrashReportingManager:V",

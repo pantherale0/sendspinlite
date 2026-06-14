@@ -99,29 +99,17 @@ This project is specially designed for low memory devices and a local network co
   - Runs as foreground service with media playback notifications
   - Handles connection persistence and recovery
 
-- **SendspinPcmClient**
-  - WebSocket protocol implementation
-  - Audio stream lifecycle management
-  - Clock synchronization loops
-  - Playout scheduling and timing control
-  - Memory monitoring and watchdog systems
-
-- **ClockSync**
-  - RTT-based offset estimation
-  - Drift calculation and uncertainty tracking
-  - SNR-based quality assessment
-
-- **AudioJitterBuffer**
-  - Timestamp-ordered queue management
-  - Late-frame detection and dropping
-  - Restart recovery logic for buffer deadlock prevention
+- **SendspinNativeClient / SendspinNative (JNI)**
+  - Kotlin wrapper around the native [sendspin-cpp](https://github.com/Sendspin/sendspin-cpp) client
+  - sendspin-cpp owns the WebSocket protocol, clock synchronization and playout scheduling
+  - Drives the `AudioTrack` output and reports playback progress to the native sync task
+  - See [docs/NATIVE_CLIENT.md](docs/NATIVE_CLIENT.md)
 
 - **PcmAudioOutput**
   - AndroidX AudioTrack wrapper
   - Multi-bit-depth support (16/24/32-bit)
-  - Playback speed control for adaptive timing
+  - Implements the `on_audio_write` contract and reports presented frames via `getPlaybackProgress()`
   - Pipeline latency estimation with smoothing
-  - Real-time latency and speed reporting
   - Buffer management for low-latency playback
 
 - **ServiceDiscovery**
@@ -172,6 +160,19 @@ Two reporting options are offered:
 |--------|----------------|-------|
 | **Upload to Sentry** | Crash & ANR reporting enabled in Settings | Returns a unique event ID to include in GitHub issues |
 | **Save to File** | Always | System file picker lets you choose where to save the `.txt` report |
+
+### Building from Source
+
+The native client lives in the `sendspin-cpp` git submodule and is compiled with the Android NDK,
+so initialise submodules and install the native toolchain (NDK `27.0.12077973`, CMake `3.22.1`)
+before building:
+
+```bash
+git submodule update --init --recursive
+./gradlew assembleDebug
+```
+
+See [docs/NATIVE_CLIENT.md](docs/NATIVE_CLIENT.md) for details.
 
 ### Building with Crash Reporting
 

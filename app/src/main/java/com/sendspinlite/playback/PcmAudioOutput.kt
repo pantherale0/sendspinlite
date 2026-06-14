@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.media.*
 import android.os.SystemClock
 import android.util.Log
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -17,6 +18,19 @@ class PcmAudioOutput {
         val sampleRate: Int,
         val channels: Int,
         val bitDepth: Int,
+    )
+
+    /**
+     * Snapshot of playback progress fed back to the native client via notify_audio_played.
+     *
+     * @param framesPlayed Frames presented since the previous snapshot (a delta).
+     * @param finishTimestampUs Monotonic time (CLOCK_MONOTONIC, microseconds) when those frames
+     * exit the DAC. This matches sendspin-cpp's host clock (std::chrono::steady_clock), which on
+     * Android is the same domain as System.nanoTime().
+     */
+    data class PlaybackProgress(
+        val framesPlayed: Long,
+        val finishTimestampUs: Long,
     )
 
     companion object {
@@ -47,6 +61,9 @@ class PcmAudioOutput {
     private val totalFramesWritten = AtomicLong(0L)
     private var playbackHeadRaw: Long = 0L
     private var playbackHeadWraps: Long = 0L
+
+    // Last frame position reported to the native client, used to emit per-poll deltas.
+    private var lastReportedFrames: Long = 0L
     @Volatile
     private var smoothedLatencyUs: Long = 0L
 
@@ -317,6 +334,150 @@ class PcmAudioOutput {
         }
     }
 
+    /**
+     * Writes PCM from a (typically direct) ByteBuffer to the AudioTrack, honouring the
+     * sendspin-cpp on_audio_write contract: write up to [length] bytes, block at most
+     * [timeoutMs], and return the number of bytes actually written. The buffer's position is
+     * advanced by the number of bytes consumed.
+     */
+    fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int {
+        if (length <= 0) return 0
+        if (!started.get()) return 0
+
+        writingCount.incrementAndGet()
+        try {
+            if (!started.get()) return 0
+            val t = track ?: return 0
+            if (t.state == AudioTrack.STATE_UNINITIALIZED) return 0
+            if (t.playState != AudioTrack.PLAYSTATE_PLAYING) return 0
+            updateSoftStartGain(t)
+
+            val bytesPerFrame = currentChannels * (currentBitDepth / 8)
+            val end = buffer.position() + length.coerceAtMost(buffer.remaining())
+            buffer.limit(end)
+
+            var written = 0
+            var zeroWriteCount = 0
+            val maxZeroWrites = 50
+            val writeStartTime = System.currentTimeMillis()
+            val maxWriteTime = if (timeoutMs > 0) timeoutMs.toLong() else 500L
+
+            while (buffer.position() < end) {
+                if (!started.get()) break
+                if (System.currentTimeMillis() - writeStartTime >= maxWriteTime) break
+                updateSoftStartGain(t)
+
+                try {
+                    val remaining = end - buffer.position()
+                    val n = t.write(buffer, remaining, AudioTrack.WRITE_NON_BLOCKING)
+                    if (n < 0) {
+                        Log.w(tag, "AudioTrack.write(ByteBuffer) returned error: $n")
+                        markTrackDeadAndRelease(t, "write_error_$n")
+                        return written
+                    }
+                    if (n == 0) {
+                        zeroWriteCount++
+                        if (zeroWriteCount > maxZeroWrites) {
+                            val blockingN =
+                                t.write(buffer, end - buffer.position(), AudioTrack.WRITE_BLOCKING)
+                            if (blockingN < 0) {
+                                Log.w(tag, "AudioTrack blocking write returned error: $blockingN")
+                                markTrackDeadAndRelease(t, "blocking_write_error_$blockingN")
+                                return written
+                            }
+                            if (blockingN == 0) {
+                                Log.w(tag, "AudioTrack buffer remained full; dropping ${end - buffer.position()} bytes")
+                                return written
+                            }
+                            written += blockingN
+                            if (bytesPerFrame > 0) {
+                                totalFramesWritten.addAndGet((blockingN / bytesPerFrame).toLong())
+                            }
+                            zeroWriteCount = 0
+                            continue
+                        }
+                        Thread.yield()
+                        Thread.sleep(2)
+                        continue
+                    }
+                    zeroWriteCount = 0
+                    written += n
+                    if (bytesPerFrame > 0) {
+                        totalFramesWritten.addAndGet((n / bytesPerFrame).toLong())
+                    }
+                } catch (e: Exception) {
+                    Log.e(tag, "Error writing ByteBuffer to AudioTrack", e)
+                    markTrackDeadAndRelease(t, "write_exception")
+                    return written
+                }
+            }
+            return written
+        } catch (e: Exception) {
+            Log.e(tag, "Error in writePcm(ByteBuffer)", e)
+            return 0
+        } finally {
+            writingCount.decrementAndGet()
+        }
+    }
+
+    /**
+     * Resets the playback-feedback baseline after [start] so the next [getPlaybackProgress] call
+     * does not emit a spurious delta (e.g. when an AudioTrack is reused and framePosition did not
+     * reset to zero after flush).
+     */
+    fun syncPlaybackFeedbackBaseline() {
+        if (!started.get()) return
+        synchronized(lock) {
+            lastReportedFrames = snapshotPresentedFramesLocked(System.nanoTime())
+        }
+    }
+
+    /**
+     * Returns the frames presented since the previous call and the monotonic timestamp at which
+     * they exit the DAC, or null when no new frames have been presented.
+     *
+     * @param nowUs Monotonic time in the sendspin-cpp clock domain
+     *     ([SendspinNative.nativeMonotonicTimeUs]), not [System.nanoTime].
+     */
+    fun getPlaybackProgress(nowUs: Long): PlaybackProgress? {
+        if (!started.get() || currentSampleRate <= 0) return null
+        synchronized(lock) {
+            val trackRef = track ?: return null
+            if (trackRef.state != AudioTrack.STATE_INITIALIZED) return null
+
+            val nowNs = System.nanoTime()
+            val presentedFrames = snapshotPresentedFramesLocked(nowNs)
+
+            val delta = (presentedFrames - lastReportedFrames).coerceAtLeast(0L)
+            lastReportedFrames = presentedFrames
+            if (delta <= 0L) return null
+
+            // Last frame in this delta reached presentation at ~now; remaining pipeline depth is
+            // accounted separately via buffered_frames in the native sync task (unplayed_us).
+            return PlaybackProgress(delta, nowUs)
+        }
+    }
+
+    private fun snapshotPresentedFramesLocked(nowNs: Long): Long {
+        val trackRef = track ?: return 0L
+        if (trackRef.state != AudioTrack.STATE_INITIALIZED) return 0L
+
+        val sampleRate = currentSampleRate.toLong().coerceAtLeast(1L)
+        val audioTimestamp = AudioTimestamp()
+        if (trackRef.getTimestamp(audioTimestamp) && audioTimestamp.nanoTime != 0L) {
+            val elapsedNs = (nowNs - audioTimestamp.nanoTime).coerceAtLeast(0L)
+            val framesElapsed = (elapsedNs.toDouble() * sampleRate / 1_000_000_000.0).toLong()
+            return audioTimestamp.framePosition + framesElapsed
+        }
+
+        val raw = trackRef.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
+        if (raw < playbackHeadRaw) {
+            playbackHeadWraps++
+        }
+        playbackHeadRaw = raw
+        return raw + (playbackHeadWraps shl 32)
+    }
+
     private fun markTrackDeadAndRelease(
         t: AudioTrack,
         reason: String,
@@ -460,7 +621,30 @@ class PcmAudioOutput {
     /**
      * Get the smoothed latency in milliseconds.
      */
-    fun getSmoothedLatencyMs(): Double = smoothedLatencyUs / 1000.0
+    fun getSmoothedLatencyMs(): Double {
+        getEstimatedPipelineLatencyUs()
+        return smoothedLatencyUs / 1000.0
+    }
+
+    /**
+     * PCM queued in the AudioTrack (written but not yet presented), in milliseconds.
+     * Used for native-client buffer diagnostics (replaces the old jitter-buffer ahead metric).
+     */
+    fun getOutputQueueMs(): Long {
+        if (!started.get() || currentSampleRate <= 0) return 0L
+        val bytesPerFrame = currentChannels * (currentBitDepth / 8)
+        if (bytesPerFrame <= 0) return 0L
+
+        synchronized(lock) {
+            val trackRef = track ?: return 0L
+            if (trackRef.state != AudioTrack.STATE_INITIALIZED) return 0L
+
+            val writtenFrames = totalFramesWritten.get()
+            val presentedFrames = snapshotPresentedFramesLocked(System.nanoTime())
+            val queuedFrames = (writtenFrames - presentedFrames).coerceAtLeast(0L)
+            return (queuedFrames * 1_000L) / currentSampleRate.toLong()
+        }
+    }
 
     /**
      * Estimated pipeline latency from AudioTrack write to speaker output (microseconds).
@@ -623,6 +807,9 @@ class PcmAudioOutput {
         currentPlaybackSpeed = 1.0f
         softStartBeganAtMs = 0L
         lastAppliedTrackGain = 1.0f
+        // Seed from the current presentation position so a reused/flushed track does not emit a
+        // bogus multi-second delta on the first feedback poll.
+        lastReportedFrames = snapshotPresentedFramesLocked(System.nanoTime())
     }
 
     fun checkAudioCapabilities(context: Context) {

@@ -10,6 +10,9 @@ android {
     namespace = "com.sendspinlite"
     compileSdk = 36
 
+    // NDK r27 with explicit 16 KB linker flags in CMake (see app/src/main/cpp/CMakeLists.txt).
+    ndkVersion = "27.0.12077973"
+
     defaultConfig {
         applicationId = "com.sendspinlite"
         minSdk = 24
@@ -20,6 +23,26 @@ android {
 
         // Sentry DSN — set via environment variable SENTRY_DSN or leave empty to disable crash reporting
         buildConfigField("String", "SENTRY_DSN", "\"${System.getenv("SENTRY_DSN") ?: ""}\"")
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++20"
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
+
+        ndk {
+            // AAudio (used transitively by sendspin-cpp host build deps) requires API 26+,
+            // but the bridge itself only needs POSIX sockets; ship the common ABIs.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {
@@ -86,9 +109,6 @@ dependencies {
 
     // Coroutines 1.6.x for API 24+ compatibility
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
-
-    // OkHttp 4.11.0 supports API 21+
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
 
     // JSON library supports API 24+
     implementation("org.json:json:20231013")

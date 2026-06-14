@@ -762,11 +762,12 @@ private fun PlayerScreen(vm: PlayerViewModel) {
 
                     val bufferColor =
                         when {
-                            ui.queuedChunks >= 190 -> Color.Green
-                            ui.queuedChunks >= 100 -> Color(0xFFFFA500) // Orange
+                            ui.bufferAheadMs >= 150 -> Color.Green
+                            ui.bufferAheadMs >= 80 -> Color(0xFFFFA500) // Orange
+                            ui.bufferAheadMs > 0 -> Color(0xFFFFA500)
                             else -> MaterialTheme.colors.error
                         }
-                    SyncInfoRow("Buffer", "${ui.queuedChunks} chunks (${ui.bufferAheadMs}ms ahead)", bufferColor)
+                    SyncInfoRow("Buffer", "${ui.queuedChunks} chunks (${ui.bufferAheadMs}ms queued)", bufferColor)
 
                     // Display smoothed latency
                     val latencyColor =

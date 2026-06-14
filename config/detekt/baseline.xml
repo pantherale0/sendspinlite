@@ -2,19 +2,17 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:ClockSync.kt$ClockSync$updateCount &gt;= 30 &amp;&amp; hasConverged() &amp;&amp; maxError &lt;= 120_000L &amp;&amp; abs(residual) &gt; dynamicResidualThresholdUs</ID>
     <ID>ComplexCondition:PcmAudioOutput.kt$PcmAudioOutput$existingTrack != null &amp;&amp; currentSampleRate == sampleRate &amp;&amp; currentChannels == channels &amp;&amp; currentBitDepth == bitDepth &amp;&amp; existingTrack.state == AudioTrack.STATE_INITIALIZED</ID>
     <ID>ComplexCondition:SendspinService.kt$SendspinService$client != null &amp;&amp; _uiState.value.wsUrl == wsUrl &amp;&amp; _uiState.value.clientId == clientId &amp;&amp; (_uiState.value.connected || _uiState.value.status.startsWith("connecting"))</ID>
     <ID>ComplexCondition:SendspinService.kt$SendspinService.&lt;no name provided&gt;$(currentState.status.startsWith("failure:") || !currentState.connected) &amp;&amp; !currentState.wsUrl.isBlank() &amp;&amp; !currentState.clientId.isBlank() &amp;&amp; !currentState.clientName.isBlank()</ID>
-    <ID>CyclomaticComplexMethod:ClockSync.kt$ClockSync$private fun update( measurement: Long, maxError: Long, timeAddedUs: Long, )</ID>
-    <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {}, )</ID>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
+    <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
+    <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
-    <ID>CyclomaticComplexMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun handleText(text: String)</ID>
-    <ID>CyclomaticComplexMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun startPlayoutLoop()</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
     <ID>FunctionNaming:MainActivity.kt$@Composable fun SyncInfoRow( label: String, value: String, color: androidx.compose.ui.graphics.Color = MaterialTheme.colors.onSurface, )</ID>
-    <ID>FunctionNaming:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {}, )</ID>
+    <ID>FunctionNaming:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.1f", uiState.smoothedLatencyMs)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.2f", uiState.driftSnr)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.2f", uiState.rttUs / 1000.0)</ID>
@@ -23,59 +21,23 @@
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.3f", uiState.driftUncertaintyPpm)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.3f", uiState.playbackSpeedMultiplier)</ID>
     <ID>ImplicitDefaultLocale:PcmAudioOutput.kt$PcmAudioOutput$String.format("%.3f", clampedSpeed)</ID>
-    <ID>ImplicitDefaultLocale:SendspinPcmClient.kt$SendspinPcmClient$String.format("%.0f", clock.getEstimatedNetworkJitterUs() / 1000.0)</ID>
-    <ID>ImplicitDefaultLocale:SendspinPcmClient.kt$SendspinPcmClient$String.format("%.2f", offsetMs)</ID>
-    <ID>ImplicitDefaultLocale:SendspinPcmClient.kt$SendspinPcmClient$String.format("%.3f", clock.estimatedDriftPpm())</ID>
-    <ID>ImplicitDefaultLocale:SendspinPcmClient.kt$SendspinPcmClient$String.format("%.3f", driftPpm)</ID>
-    <ID>ImplicitDefaultLocale:SendspinPcmClient.kt$SendspinPcmClient$String.format("%.3f", driftUncertaintyPpm)</ID>
-    <ID>LargeClass:SendspinPcmClient.kt$SendspinPcmClient</ID>
+    <ID>InvalidPackageDeclaration:FrameworkResumeCrashTest.kt$package com.sendspinlite.ui</ID>
+    <ID>LargeClass:PcmAudioOutput.kt$PcmAudioOutput</ID>
+    <ID>LargeClass:SendspinService.kt$SendspinService : Service</ID>
     <ID>LongMethod:AudioIssueReporter.kt$AudioIssueReporter$fun buildReport(uiState: PlayerViewModel.UiState): String</ID>
-    <ID>LongMethod:ClockSync.kt$ClockSync$private fun update( measurement: Long, maxError: Long, timeAddedUs: Long, )</ID>
-    <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen( vm: PlayerViewModel, showBatteryWarning: Boolean = false, onRequestInstallPermission: () -&gt; Unit = {}, )</ID>
+    <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>LongMethod:MainActivity.kt$private fun exportAndShareLogs( context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -&gt; Unit, )</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
+    <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
-    <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun handleText(text: String)</ID>
-    <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$private fun startPlayoutLoop()</ID>
-    <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$private suspend fun runAudioWarmupIfNeeded()</ID>
-    <ID>LongMethod:SendspinPcmClient.kt$SendspinPcmClient$suspend fun connect()</ID>
+    <ID>LongMethod:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded(context: Context, output: PcmAudioOutput, tag: String)</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
-    <ID>LoopWithTooManyJumpStatements:AudioJitterBuffer.kt$AudioJitterBuffer$while</ID>
+    <ID>LongParameterList:SendspinNative.kt$SendspinNative$( callbacks: SendspinNativeCallbacks, clientId: String, name: String, productName: String, manufacturer: String, softwareVersion: String, fixedDelayUs: Int, audioBufferCapacity: Long, initialStaticDelayMs: Int, )</ID>
+    <ID>LongParameterList:SendspinNative.kt$SendspinNativeCallbacks$( title: String?, artist: String?, album: String?, albumArtist: String?, artworkUrl: String?, year: Int, track: Int, progressMs: Int, durationMs: Int, )</ID>
     <ID>LoopWithTooManyJumpStatements:PcmAudioOutput.kt$PcmAudioOutput$while</ID>
-    <ID>LoopWithTooManyJumpStatements:SendspinPcmClient.kt$SendspinPcmClient$while</ID>
     <ID>MagicNumber:AudioIssueReporter.kt$AudioIssueReporter$1000.0</ID>
     <ID>MagicNumber:AudioIssueReporter.kt$AudioIssueReporter$50</ID>
-    <ID>MagicNumber:AudioJitterBuffer.kt$AudioJitterBuffer$1000L</ID>
-    <ID>MagicNumber:AudioJitterBuffer.kt$AudioJitterBuffer$500</ID>
-    <ID>MagicNumber:AutoUpdateManager.kt$AutoUpdateManager$10_000</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$0.1</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$0.8</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$1.2</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$10</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$100.0</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$1000L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$100_000</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$120_000L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$15</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$150L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$1_000_000.0</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$20</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$2000L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$20_000</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$250L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$25L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$3</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$3.0</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$30</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$3000L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$4.0</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$5</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$500L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$50L</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$50_000</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$50_000.0</ID>
-    <ID>MagicNumber:ClockSync.kt$ClockSync$8</ID>
     <ID>MagicNumber:CrashReportingManager.kt$CrashReportingManager$50</ID>
     <ID>MagicNumber:MainActivity.kt$0.01</ID>
     <ID>MagicNumber:MainActivity.kt$0.995f</ID>
@@ -83,10 +45,9 @@
     <ID>MagicNumber:MainActivity.kt$0xFFFFA500</ID>
     <ID>MagicNumber:MainActivity.kt$1.001f</ID>
     <ID>MagicNumber:MainActivity.kt$1.005f</ID>
-    <ID>MagicNumber:MainActivity.kt$100</ID>
     <ID>MagicNumber:MainActivity.kt$1000.0</ID>
     <ID>MagicNumber:MainActivity.kt$10_000</ID>
-    <ID>MagicNumber:MainActivity.kt$190</ID>
+    <ID>MagicNumber:MainActivity.kt$150</ID>
     <ID>MagicNumber:MainActivity.kt$1_000</ID>
     <ID>MagicNumber:MainActivity.kt$25.0</ID>
     <ID>MagicNumber:MainActivity.kt$300.0</ID>
@@ -97,10 +58,11 @@
     <ID>MagicNumber:MainActivity.kt$5000L</ID>
     <ID>MagicNumber:MainActivity.kt$50_000</ID>
     <ID>MagicNumber:MainActivity.kt$5_000</ID>
+    <ID>MagicNumber:MainActivity.kt$80</ID>
     <ID>MagicNumber:MainActivity.kt$MainActivity$100</ID>
-    <ID>MagicNumber:OpusDecoder.kt$OpusDecoder$5760</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.0001f</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.05f</ID>
+    <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.10</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.25</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.5f</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.999f</ID>
@@ -108,8 +70,10 @@
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$10</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$1000</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$1000.0</ID>
+    <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$1000L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$10L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$16</ID>
+    <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$1_000L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$1_000_000L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$1_000_000_000.0</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$20_000L</ID>
@@ -119,88 +83,42 @@
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$32</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$3L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$4</ID>
-    <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$4000</ID>
+    <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$40L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$40_000L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$48000</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$50</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$500L</ID>
-    <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$512</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$7L</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$8</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$8192</ID>
+    <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$0.10</ID>
+    <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$1024</ID>
+    <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$16</ID>
+    <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$24</ID>
+    <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$32</ID>
+    <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$4000</ID>
+    <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$8</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$100</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$1_500_000_000L</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$5000</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$5000L</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel.&lt;no name provided&gt;$100</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$0.00005</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$0.0001f</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$0.3</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$0.7</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$0.998</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$0xFF</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$0xFFL</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$1.002</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$10</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$100</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$1000</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$1000.0</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$1000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$100L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$100_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$1024</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$10L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$10_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$12.0</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$120L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$150</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$150L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$16</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$1_000_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$20</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$200</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$200L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$200_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$20L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$20_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$24</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$250</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$250L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$250_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$2_000_000</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$2_000_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$2_000_000_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$2_500_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$3</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$30</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$300</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$3000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$30L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$30_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$32</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$3_000_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$4</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$40L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$40_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$44100</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$443</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$44_100</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$48000</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$48_000</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$50</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$5000</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$5000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$500L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$500_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$50L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$50_000L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$60</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$60L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$8</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$80</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$80L</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$9000</ID>
-    <ID>MagicNumber:SendspinPcmClient.kt$SendspinPcmClient$90L</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$1000</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$1000.0</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$1024</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$16</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$20</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$24</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$250</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$32</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$4</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$44_100</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$48_000</ID>
+    <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$8</ID>
+    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$100</ID>
+    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$1_000L</ID>
+    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$5000L</ID>
+    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$5_000L</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$100</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$1000</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$1000L</ID>
@@ -213,20 +131,17 @@
     <ID>MagicNumber:SendspinService.kt$SendspinService$60000L</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService.&lt;no name provided&gt;$100</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService.&lt;no name provided&gt;$1000</ID>
-    <ID>MaxLineLength:AutoUpdateManager.kt$AutoUpdateManager$private fun prefs(context: Context): SharedPreferences</ID>
-    <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.d(tag, "convertServerToClient: server=$serverTimeUs baseline=$baseline offset=${te.offset.toLong()}us -&gt; client=$result")</ID>
-    <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.i(tag, "Init [1/8]: offset=${normalizedMeasurement}us (raw=${measurement}us, baseline=${baselineOffsetUs}us)")</ID>
-    <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.i(tag, "Initialization complete: offset=${offset.toLong()}us, starting Kalman filter for continuous drift tracking")</ID>
-    <ID>MaxLineLength:ClockSync.kt$ClockSync$Log.w(tag, "Extreme outlier rejected: rtt=${rtt}us vs median=${medianRtt}us (factor=${rtt.toDouble() / medianRtt})")</ID>
+    <ID>MagicNumber:SendspinSystemUtils.kt$SendspinSystemUtils$100</ID>
+    <ID>MagicNumber:SendspinSystemUtils.kt$SendspinSystemUtils$2_000_000_000L</ID>
     <ID>MaxLineLength:CrashReportingManager.kt$CrashReportingManager$private fun prefs(context: Context): SharedPreferences</ID>
+    <ID>MaxLineLength:FrameworkResumeCrashTest.kt$FrameworkResumeCrashTest$StackTraceElement("android.app.IActivityManager\$Stub\$Proxy", "isTopOfTask", "IActivityManager.java", 8367)</ID>
     <ID>MaxLineLength:MainActivity.kt$"Sendspin Lite crashed during the last session. The crash was automatically reported to help improve the app."</ID>
     <ID>MaxLineLength:MainActivity.kt$"Sendspin Lite crashed during the last session. Would you like to send an anonymous crash report to help improve the app?"</ID>
     <ID>MaxLineLength:MainActivity.kt$"The upload failed. Please save the report to a file and attach it to your GitHub issue instead."</ID>
-    <ID>MaxLineLength:MainActivity.kt$MainActivity$showBatteryWarning = !shownBatteryWarning &amp;&amp; Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.LOLLIPOP</ID>
     <ID>MaxLineLength:MainActivity.kt$stringBuilder.append("Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}\n")</ID>
     <ID>MaxLineLength:MainActivity.kt$ui.playbackSpeedMultiplier &gt;= 0.995f &amp;&amp; ui.playbackSpeedMultiplier &lt;= 1.005f -&gt; Color(0xFFFFA500)</ID>
     <ID>MaxLineLength:MainActivity.kt$ui.playbackSpeedMultiplier &gt;= 0.999f &amp;&amp; ui.playbackSpeedMultiplier &lt;= 1.001f -&gt; Color.Green</ID>
-    <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBuffer=$deviceOptimalBuffer"</ID>
+    <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBufferMs=$deviceOptimalBufferMs"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"AudioTrack buffer remained full after retries; dropping tail (${pcm.size - off} bytes)"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"Selected native warmup format sr=${format.sampleRate} ch=${format.channels} bd=${format.bitDepth}"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$// For now we won't do anything with this, but we can explore adjusting the 250ms HAL buffer based on the deviceOptimalBuffer</ID>
@@ -236,81 +151,62 @@
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$SendspinService.startService(getApplication(), wsUrl, deviceId, "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$deviceId = Settings.Secure.getString(getApplication&lt;Application&gt;().contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$val activityManager = getApplication&lt;Application&gt;().getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"Audio output started sr=$sampleRate ch=$channels bd=$bitDepth codec=$codec (buffered=${snap2.bufferAheadMs}ms)"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"CRITICAL memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 150 for LAN stability)"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"LOW memory trim: reducing buffer from $currentSize to $targetSize chunks (minimum 200 for stable playback)"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"Stream discontinuity detected: jump=${timestampJumpUs / 1000}ms, clearing buffer and entering discontinuity recovery mode"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"audio-cut triggered: too far behind (serverLate=${serverLatenessMs}ms, drops=$lateDropsCount, buffer=${snapBeforeCut.queuedChunks} chunks). Cutting audio and resyncing."</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"catch-up: dropped=$dropped (${(nowUs() - catchupStart) / 1000}ms) playoutOffset=${playoutOffsetUs / 1000}ms adjustment=${playoutOffsetAdjustmentUs / 1000}ms (audibleSyncCount=$audibleSyncCount)"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"drift=${String.format("%.3f", driftPpm)}ppm±${String.format("%.3f", driftUncertaintyPpm)} "</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"forcing late-start recovery: ahead=${snap2.bufferAheadMs}ms effectiveAhead=${effectiveBufferAheadMs}ms queued=${snap2.queuedChunks}"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"offset=${clock.estimatedOffsetUs() / 1000L}ms drift=${String.format("%.3f", clock.estimatedDriftPpm())}ppm"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$"restart-catchup: dropped=$dropped head was late (ahead~${snapshot.bufferAheadMs}ms)"</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$// Calculate effective playout offset: pipeline delay + measured codec decode latency + device adjustment</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$Log.d("SendspinPcmClient", "AudioSchedule: serverTs=$effectiveServerTsUs localPlay=$localPlayUs now=$now early=${earlyUs / 1000}ms serverLate=${serverLatenessMs}ms playout=${totalPlayoutOffsetUs / 1000}ms")</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$Log.i(tag, "force-resync complete: serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$Log.w(tag, "force-resync runtime: dropped=$dropped serverLate=${serverLatenessMs}ms early=${earlyUs / 1000}ms")</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$if</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$val nextTotalPlayoutOffsetUs = playoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs</ID>
-    <ID>MaxLineLength:SendspinPcmClient.kt$SendspinPcmClient$val totalPlayoutOffsetUs = rampedBasePlayoutOffsetUs - decodeLatencyUs + playoutOffsetAdjustmentUs - staticDelayUs</ID>
+    <ID>MaxLineLength:SendspinAudioWarmup.kt$SendspinAudioWarmup$"Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}"</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)</ID>
+    <ID>MaxLineLength:SendspinService.kt$SendspinService$wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SendspinService::WifiLock")</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService.&lt;no name provided&gt;$connect(currentState.wsUrl, currentState.clientId, currentState.clientName, fromBoot = false)</ID>
     <ID>MaxLineLength:ServiceDiscovery.kt$ServiceDiscovery.&lt;no name provided&gt;$Log.i(tag, "Added server: ${discoveredServer.name} at $url. Total servers: ${_discoveredServers.value.size}")</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun selectHighestNativePcmFormat( context: Context, sampleRateCandidates: List&lt;Int&gt;, channelCandidates: List&lt;Int&gt;, bitDepthCandidates: List&lt;Int&gt;, ): PcmFormat?</ID>
+    <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$private fun stopInternal(t: AudioTrack?)</ID>
-    <ID>NestedBlockDepth:SendspinPcmClient.kt$SendspinPcmClient$private fun getConnectionType(): String</ID>
-    <ID>NestedBlockDepth:SendspinPcmClient.kt$SendspinPcmClient$private fun handleText(text: String)</ID>
-    <ID>ReturnCount:AutoUpdateManager.kt$AutoUpdateManager$fun installDownloadedApk( context: Context, downloadId: Long, )</ID>
-    <ID>ReturnCount:AutoUpdateManager.kt$AutoUpdateManager$internal fun isNewerVersion( remote: String, current: String, ): Boolean</ID>
-    <ID>ReturnCount:ClockSync.kt$ClockSync$private fun update( measurement: Long, maxError: Long, timeAddedUs: Long, )</ID>
-    <ID>ReturnCount:DownloadCompleteReceiver.kt$DownloadCompleteReceiver$override fun onReceive( context: Context, intent: Intent, )</ID>
-    <ID>ReturnCount:OpusDecoder.kt$OpusDecoder$fun decode(opusData: ByteArray): ByteArray</ID>
+    <ID>NestedBlockDepth:SendspinSystemUtils.kt$SendspinSystemUtils$fun getConnectionType(context: Context, tag: String): String</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun getEstimatedPipelineLatencyUs(): Long</ID>
+    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun getOutputQueueMs(): Long</ID>
+    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun getPlaybackProgress(nowUs: Long): PlaybackProgress?</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun setPlaybackSpeed(speed: Float)</ID>
+    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
+    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
-    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$private fun isNativePcmFormatSupported(format: PcmFormat): Boolean</ID>
-    <ID>ReturnCount:SendspinPcmClient.kt$SendspinPcmClient$fun isHealthy(): Boolean</ID>
-    <ID>ReturnCount:SendspinPcmClient.kt$SendspinPcmClient$private fun handleBinary(data: ByteArray)</ID>
-    <ID>ReturnCount:SendspinPcmClient.kt$SendspinPcmClient$private suspend fun runAudioWarmupIfNeeded()</ID>
+    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$private fun snapshotPresentedFramesLocked(nowNs: Long): Long</ID>
+    <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun buildPlaybackFormat( sampleRate: Int, channels: Int, bitDepth: Int, ): AudioFormat?</ID>
+    <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun getMinBufferSizeIfSupported( sampleRate: Int, channels: Int, bitDepth: Int, ): Int</ID>
+    <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun isPlaybackFormatSupported( sampleRate: Int, channels: Int, bitDepth: Int, ): Boolean</ID>
+    <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$private fun isStructurallyValid(format: AudioFormat): Boolean</ID>
+    <ID>ReturnCount:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded(context: Context, output: PcmAudioOutput, tag: String)</ID>
+    <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$override fun isNetworkReady(): Boolean</ID>
+    <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$private fun deriveClockStability(timeSynced: Boolean, clockUpdateCount: Int): String</ID>
+    <ID>ReturnCount:SendspinService.kt$SendspinService$override fun onStartCommand( intent: Intent?, flags: Int, startId: Int, ): Int</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$private fun isNetworkAvailable(): Boolean</ID>
-    <ID>SwallowedException:AutoUpdateManager.kt$AutoUpdateManager$e: Exception</ID>
+    <ID>ReturnCount:SendspinSystemUtils.kt$SendspinSystemUtils$fun isBatteryOptimizationIgnored(context: Context): Boolean</ID>
     <ID>SwallowedException:PcmAudioOutput.kt$PcmAudioOutput$e: UnsupportedOperationException</ID>
     <ID>SwallowedException:PlayerViewModel.kt$PlayerViewModel$e: Exception</ID>
     <ID>SwallowedException:PortChecker.kt$PortChecker$e: SocketTimeoutException</ID>
     <ID>TooGenericExceptionCaught:AudioIssueReporter.kt$AudioIssueReporter$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:AutoUpdateManager.kt$AutoUpdateManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CrashReportingManager.kt$CrashReportingManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:MainActivity.kt$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:OpusDecoder.kt$OpusDecoder$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PcmAudioOutput.kt$PcmAudioOutput$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PlayerViewModel.kt$PlayerViewModel$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PortChecker.kt$PortChecker$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SendspinPcmClient.kt$SendspinPcmClient$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SendspinPcmClient.kt$SendspinPcmClient$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SendspinAudioWarmup.kt$SendspinAudioWarmup$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SendspinNativeClient.kt$SendspinNativeClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SendspinService.kt$SendspinService$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SendspinSystemUtils.kt$SendspinSystemUtils$e: Exception</ID>
     <ID>TooGenericExceptionCaught:ServiceDiscovery.kt$ServiceDiscovery$e: Exception</ID>
-    <ID>TooManyFunctions:AutoUpdateManager.kt$AutoUpdateManager</ID>
-    <ID>TooManyFunctions:ClockSync.kt$ClockSync</ID>
     <ID>TooManyFunctions:CrashReportingManager.kt$CrashReportingManager</ID>
     <ID>TooManyFunctions:PcmAudioOutput.kt$PcmAudioOutput</ID>
     <ID>TooManyFunctions:PlayerViewModel.kt$PlayerViewModel : AndroidViewModel</ID>
-    <ID>TooManyFunctions:SendspinPcmClient.kt$SendspinPcmClient</ID>
+    <ID>TooManyFunctions:SendspinNative.kt$SendspinNative</ID>
+    <ID>TooManyFunctions:SendspinNative.kt$SendspinNativeCallbacks</ID>
+    <ID>TooManyFunctions:SendspinNativeClient.kt$SendspinNativeClient : SendspinNativeCallbacks</ID>
     <ID>TooManyFunctions:SendspinService.kt$SendspinService : Service</ID>
-    <ID>UnusedPrivateProperty:SendspinPcmClient.kt$SendspinPcmClient$private val audioDropDetectionMs = 50L // If we detect drops and buffer drops below this, prepare for cut</ID>
-    <ID>UnusedPrivateProperty:SendspinPcmClient.kt$SendspinPcmClient$private val audioResyncTargetMs = 80L // Target buffer depth after resync</ID>
-    <ID>UnusedPrivateProperty:SendspinPcmClient.kt$SendspinPcmClient$private val discontinuityModeTimeoutMs = 1000L // Exit mode after 1 second of normal chunks</ID>
-    <ID>UnusedPrivateProperty:SendspinPcmClient.kt$SendspinPcmClient$val totalMemMb = (memInfo?.totalMem ?: 0L) / (1024 * 1024)</ID>
     <ID>UnusedPrivateProperty:ServiceDiscovery.kt$ServiceDiscovery$private var resolveListener: NsdManager.ResolveListener? = null</ID>
     <ID>WildcardImport:MainActivity.kt$import androidx.compose.foundation.layout.*</ID>
     <ID>WildcardImport:MainActivity.kt$import androidx.compose.material.*</ID>
     <ID>WildcardImport:MainActivity.kt$import androidx.compose.material.icons.filled.*</ID>
     <ID>WildcardImport:MainActivity.kt$import androidx.compose.runtime.*</ID>
     <ID>WildcardImport:PcmAudioOutput.kt$import android.media.*</ID>
-    <ID>WildcardImport:SendspinPcmClient.kt$import kotlinx.coroutines.*</ID>
-    <ID>WildcardImport:SendspinPcmClient.kt$import okhttp3.*</ID>
     <ID>WildcardImport:SendspinService.kt$import android.app.*</ID>
     <ID>WildcardImport:SendspinService.kt$import kotlinx.coroutines.*</ID>
   </CurrentIssues>
