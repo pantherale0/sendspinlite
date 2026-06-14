@@ -101,18 +101,24 @@ class SendspinNativeClient(
     }
 
     suspend fun connect() {
-        val h = handle
-        if (h == 0L) {
-            Log.w(tag, "connect() called after destroy")
-            return
-        }
         status = "connecting"
         updateDiagnostics { it.copy(status = status) }
 
-        withContext(Dispatchers.IO) {
-            SendspinNative.nativeStart(h)
-            SendspinNative.nativeConnect(h, wsUrl)
-        }
+        val connected =
+            withContext(Dispatchers.IO) {
+                synchronized(handleLock) {
+                    val h = handle
+                    if (h == 0L) {
+                        Log.w(tag, "connect() called after destroy")
+                        return@withContext false
+                    }
+                    SendspinNative.nativeStart(h)
+                    SendspinNative.nativeConnect(h, wsUrl)
+                    true
+                }
+            }
+        if (!connected) return
+
         started.set(true)
         startFeedbackLoop()
         startDiagnosticsLoop()
@@ -151,6 +157,11 @@ class SendspinNativeClient(
     }
 
     fun cleanupResources() {
+        started.set(false)
+        feedbackJob?.cancel()
+        feedbackJob = null
+        diagnosticsJob?.cancel()
+        diagnosticsJob = null
         close("resource_cleanup")
         synchronized(handleLock) {
             val h = handle
@@ -210,10 +221,21 @@ class SendspinNativeClient(
 
     fun trimAudioBufferLow() = Log.i(tag, "trimAudioBufferLow: no-op (native ring buffer)")
 
-    fun isHealthy(): Boolean {
-        val h = handle
-        if (h == 0L) return false
-        return SendspinNative.nativeIsConnected(h) && SendspinNative.nativeIsTimeSynced(h)
+    fun isHealthy(): Boolean =
+        withHandle { h ->
+            SendspinNative.nativeIsConnected(h) && SendspinNative.nativeIsTimeSynced(h)
+        } == true
+
+    /**
+     * Runs [block] with the native handle while holding [handleLock].
+     * Returns null when the handle has been destroyed.
+     */
+    private inline fun <T> withHandle(block: (Long) -> T): T? {
+        synchronized(handleLock) {
+            val h = handle
+            if (h == 0L) return null
+            return block(h)
+        }
     }
 
     // ========================================================================
@@ -222,69 +244,93 @@ class SendspinNativeClient(
 
     private fun startFeedbackLoop() {
         feedbackJob?.cancel()
-        feedbackJob = scope.launch {
-            while (isActive && started.get()) {
-                val h = handle
-                if (h != 0L && output.isStarted()) {
-                    val nowUs = SendspinNative.nativeMonotonicTimeUs()
-                    val progress = output.getPlaybackProgress(nowUs)
-                    if (progress != null && progress.framesPlayed > 0) {
-                        SendspinNative.nativeNotifyAudioPlayed(
-                            h,
-                            progress.framesPlayed.toInt(),
-                            progress.finishTimestampUs,
-                        )
+        feedbackJob =
+            scope.launch {
+                while (isActive && started.get()) {
+                    if (output.isStarted()) {
+                        val nowUs = SendspinNative.nativeMonotonicTimeUs()
+                        val progress = output.getPlaybackProgress(nowUs)
+                        if (progress != null && progress.framesPlayed > 0) {
+                            withHandle { h ->
+                                if (started.get()) {
+                                    SendspinNative.nativeNotifyAudioPlayed(
+                                        h,
+                                        progress.framesPlayed.toInt(),
+                                        progress.finishTimestampUs,
+                                    )
+                                }
+                            }
+                        }
                     }
+                    delay(FEEDBACK_INTERVAL_MS)
                 }
-                delay(FEEDBACK_INTERVAL_MS)
             }
-        }
     }
 
     private fun startDiagnosticsLoop() {
         diagnosticsJob?.cancel()
-        diagnosticsJob = scope.launch {
-            while (isActive && started.get()) {
-                val h = handle
-                if (h != 0L) {
-                    val connected = SendspinNative.nativeIsConnected(h)
-                    val timeSynced = SendspinNative.nativeIsTimeSynced(h)
-                    val progressMs = SendspinNative.nativeGetTrackProgressMs(h)
-                    val durationMs = SendspinNative.nativeGetTrackDurationMs(h)
-                    val outputStarted = output.isStarted()
-                    val outputQueueMs = if (outputStarted) output.getOutputQueueMs() else 0L
-                    val latencyMs = if (outputStarted) output.getSmoothedLatencyMs() else 0.0
-                    // ~20 ms nominal chunk size; maps output queue depth to a chunk count for the UI.
-                    val queuedChunks =
-                        if (outputQueueMs > 0L) {
-                            ((outputQueueMs + 19L) / 20L).toInt().coerceAtLeast(1)
-                        } else {
-                            0
+        diagnosticsJob =
+            scope.launch {
+                while (isActive && started.get()) {
+                    val snapshot =
+                        withHandle { h ->
+                            if (!started.get()) return@withHandle null
+                            DiagnosticsSnapshot(
+                                connected = SendspinNative.nativeIsConnected(h),
+                                timeSynced = SendspinNative.nativeIsTimeSynced(h),
+                                progressMs = SendspinNative.nativeGetTrackProgressMs(h),
+                                durationMs = SendspinNative.nativeGetTrackDurationMs(h),
+                                staticDelayMs = SendspinNative.nativeGetStaticDelayMs(h).toLong(),
+                            )
                         }
-                    updateDiagnostics {
-                        it.copy(
-                            status = status,
-                            connected = connected,
-                            activeRoles = if (connected) ACTIVE_ROLES else "",
-                            clockReadyForPlayback = timeSynced,
-                            audioOutputStarted = outputStarted,
-                            smoothedLatencyMs = latencyMs,
-                            queuedChunks = queuedChunks,
-                            bufferAheadMs = outputQueueMs,
-                            effectiveBufferAheadMs = outputQueueMs,
-                            staticDelayMs = SendspinNative.nativeGetStaticDelayMs(h).toLong(),
-                            connectionType = SendspinSystemUtils.getConnectionType(context, tag),
-                            networkQuality = deriveNetworkQuality(it.offsetUncertaintyUs),
-                            stability = deriveClockStability(timeSynced, it.clockUpdateCount),
-                            trackProgress = if (durationMs > 0) progressMs.toLong() else it.trackProgress,
-                            trackDuration = if (durationMs > 0) durationMs.toLong() else it.trackDuration,
-                        )
+                    if (snapshot != null) {
+                        publishDiagnostics(snapshot)
                     }
+                    delay(DIAGNOSTICS_INTERVAL_MS)
                 }
-                delay(DIAGNOSTICS_INTERVAL_MS)
             }
+    }
+
+    private fun publishDiagnostics(snapshot: DiagnosticsSnapshot) {
+        val outputStarted = output.isStarted()
+        val outputQueueMs = if (outputStarted) output.getOutputQueueMs() else 0L
+        val latencyMs = if (outputStarted) output.getSmoothedLatencyMs() else 0.0
+        val queuedChunks =
+            if (outputQueueMs > 0L) {
+                ((outputQueueMs + CHUNK_MS - 1L) / CHUNK_MS).toInt().coerceAtLeast(1)
+            } else {
+                0
+            }
+        updateDiagnostics {
+            it.copy(
+                status = status,
+                connected = snapshot.connected,
+                activeRoles = if (snapshot.connected) ACTIVE_ROLES else "",
+                clockReadyForPlayback = snapshot.timeSynced,
+                audioOutputStarted = outputStarted,
+                smoothedLatencyMs = latencyMs,
+                queuedChunks = queuedChunks,
+                bufferAheadMs = outputQueueMs,
+                effectiveBufferAheadMs = outputQueueMs,
+                staticDelayMs = snapshot.staticDelayMs,
+                connectionType = SendspinSystemUtils.getConnectionType(context, tag),
+                networkQuality = deriveNetworkQuality(it.offsetUncertaintyUs),
+                stability = deriveClockStability(snapshot.timeSynced, it.clockUpdateCount),
+                trackProgress =
+                    if (snapshot.durationMs > 0) snapshot.progressMs.toLong() else it.trackProgress,
+                trackDuration =
+                    if (snapshot.durationMs > 0) snapshot.durationMs.toLong() else it.trackDuration,
+            )
         }
     }
+
+    private data class DiagnosticsSnapshot(
+        val connected: Boolean,
+        val timeSynced: Boolean,
+        val progressMs: Int,
+        val durationMs: Int,
+        val staticDelayMs: Long,
+    )
 
     private fun updateDiagnostics(block: (ClientDiagnostics) -> ClientDiagnostics) {
         _diagnostics.update(block)
@@ -426,9 +472,15 @@ class SendspinNativeClient(
         this.status = status
         if (!connected) {
             firstTimeSyncedAtMs = 0L
-        } else if (firstTimeSyncedAtMs == 0L && SendspinNative.nativeIsTimeSynced(handle)) {
-            firstTimeSyncedAtMs = System.currentTimeMillis()
+        } else {
+            withHandle { h ->
+                if (firstTimeSyncedAtMs == 0L && SendspinNative.nativeIsTimeSynced(h)) {
+                    firstTimeSyncedAtMs = System.currentTimeMillis()
+                }
+            }
         }
+        val timeSyncedForUi =
+            withHandle { h -> SendspinNative.nativeIsTimeSynced(h) } == true
         updateDiagnostics {
             it.copy(
                 status = status,
@@ -437,7 +489,7 @@ class SendspinNativeClient(
                 networkQuality = if (connected) deriveNetworkQuality(it.offsetUncertaintyUs) else "UNKNOWN",
                 stability =
                     if (connected) {
-                        deriveClockStability(SendspinNative.nativeIsTimeSynced(handle), it.clockUpdateCount)
+                        deriveClockStability(timeSyncedForUi, it.clockUpdateCount)
                     } else {
                         "UNSTABLE"
                     },
@@ -472,6 +524,8 @@ class SendspinNativeClient(
         private const val AUDIO_BUFFER_CAPACITY = 2_000_000L
         private const val FEEDBACK_INTERVAL_MS = 5L
         private const val DIAGNOSTICS_INTERVAL_MS = 250L
+        /** Nominal chunk duration used for output-queue → chunk count UI mapping. */
+        private const val CHUNK_MS = 20L
         /** Roles compiled into the native client (player + metadata). */
         private const val ACTIVE_ROLES = "player, metadata"
     }
