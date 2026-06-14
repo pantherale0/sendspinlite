@@ -25,7 +25,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.takeWhile
 import com.sendspinlite.client.ClientEvent
-import com.sendspinlite.client.SendspinPcmClient
+import com.sendspinlite.client.SendspinNativeClient
 import com.sendspinlite.ui.MainActivity
 import com.sendspinlite.ui.PlayerViewModel
 import kotlinx.coroutines.flow.StateFlow
@@ -36,7 +36,7 @@ class SendspinService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private var client: SendspinPcmClient? = null
+    private var client: SendspinNativeClient? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
@@ -53,7 +53,7 @@ class SendspinService : Service() {
     // Unlimited reconnection attempts - will keep retrying until manually disconnected
 
     // Per-connection flow collectors. These MUST be cancelled on every disconnect/reconnect,
-    // otherwise each connect() leaks two coroutines that keep the previous SendspinPcmClient
+    // otherwise each connect() leaks two coroutines that keep the previous SendspinNativeClient
     // (and its buffers/audio output) reachable forever. Relying solely on a takeWhile() guard
     // is insufficient: once `client` is reassigned the old client's flows stop emitting, so the
     // guard never re-evaluates and the collector stays suspended, pinning the dead client in
@@ -230,11 +230,24 @@ class SendspinService : Service() {
             Log.i(tag, "Service started from boot context")
         }
 
-        intent?.let {
-            val wsUrl = it.getStringExtra("wsUrl") ?: return@let
-            val clientId = it.getStringExtra("clientId") ?: return@let
-            val clientName = it.getStringExtra("clientName") ?: return@let
+        // Fulfill startForegroundService contract immediately to prevent ANR
+        startForegroundWithRetry(fromBoot = startedFromBoot || fromBoot)
 
+        if (intent == null) {
+            return START_STICKY
+        }
+
+        val mediaAction = intent.getStringExtra("media_action")
+        if (mediaAction != null) {
+            Log.i(tag, "Ignored media action: $mediaAction (not supported by native client)")
+            return START_STICKY
+        }
+
+        val wsUrl = intent.getStringExtra("wsUrl")
+        val clientId = intent.getStringExtra("clientId")
+        val clientName = intent.getStringExtra("clientName")
+
+        if (wsUrl != null && clientId != null && clientName != null) {
             // Prevent duplicate connections within 1 second
             val currentTime = System.currentTimeMillis()
             if (lastConnectUrl == wsUrl && (currentTime - lastConnectTime) < 1000) {
@@ -490,13 +503,18 @@ class SendspinService : Service() {
         }
 
         val activeClient =
-            SendspinPcmClient(
+            SendspinNativeClient(
                 wsUrl = wsUrl,
                 clientId = clientId,
                 clientName = clientName,
                 context = this,
             )
         client = activeClient
+        // Let the native library drive the WiFi high-performance lock during sync bursts/streaming.
+        activeClient.onRequestHighPerformance = { wifiLock?.acquire() }
+        activeClient.onReleaseHighPerformance = {
+            wifiLock?.let { if (it.isHeld) it.release() }
+        }
         activeClient.setStaticDelayMs(_uiState.value.staticDelayMs)
 
         // Listen to client diagnostics Flow.
@@ -565,7 +583,10 @@ class SendspinService : Service() {
                         playerMuted = diag.playerMuted,
                         playerMutedFromServer = diag.playerMutedFromServer,
                         staticDelayMs = diag.staticDelayMs,
-                        staticDelayMsFromServer = diag.staticDelayMsFromServer
+                        staticDelayMsFromServer = diag.staticDelayMsFromServer,
+                        hasMetadata = diag.hasMetadata,
+                        hasController = diag.hasController,
+                        isLowMemoryDevice = diag.isLowMemoryDevice,
                     )
 
                     // Mark that we had at least one successful websocket connection.

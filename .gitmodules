@@ -4,3 +4,6 @@
 [submodule "time-filter"]
 	path = time-filter
 	url = https://github.com/sendspin/time-filter
+[submodule "sendspin-cpp"]
+	path = sendspin-cpp
+	url = https://github.com/Sendspin/sendspin-cpp
