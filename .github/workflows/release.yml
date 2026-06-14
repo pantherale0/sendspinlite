@@ -13,8 +13,63 @@ jobs:
     uses: ./.github/workflows/release-checks.yml
     secrets: inherit
 
+  validate-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version code against previous release
+        run: |
+          TAG_NAME=${{ github.ref_name }}
+          VERSION_NAME=${TAG_NAME#v}
+
+          if ! [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag must be in format vMAJOR.MINOR (e.g. v1.7), got: $TAG_NAME"
+            exit 1
+          fi
+
+          IFS='.' read -r MAJOR MINOR <<< "$VERSION_NAME"
+          VERSION_CODE=$((MAJOR * 100 + MINOR))
+
+          git fetch --tags --quiet
+
+          PREVIOUS_MAX=0
+          PREVIOUS_TAG=""
+
+          while IFS= read -r tag; do
+            [ "$tag" = "$TAG_NAME" ] && continue
+
+            prior_version=${tag#v}
+            if ! [[ "$prior_version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              continue
+            fi
+
+            IFS='.' read -r major minor <<< "$prior_version"
+            code=$((major * 100 + minor))
+
+            if [ "$code" -gt "$PREVIOUS_MAX" ]; then
+              PREVIOUS_MAX=$code
+              PREVIOUS_TAG=$tag
+            fi
+          done < <(git tag --sort=-v:refname)
+
+          if [ "$PREVIOUS_MAX" -eq 0 ]; then
+            echo "No previous semver release tags found; version code $VERSION_CODE is acceptable."
+            exit 0
+          fi
+
+          if [ "$VERSION_CODE" -le "$PREVIOUS_MAX" ]; then
+            echo "::error::Version code $VERSION_CODE (from $TAG_NAME) must be greater than the previous release $PREVIOUS_TAG (version code $PREVIOUS_MAX)."
+            exit 1
+          fi
+
+          echo "Version code $VERSION_CODE ($TAG_NAME) is greater than previous release $PREVIOUS_TAG ($PREVIOUS_MAX)."
+
   build-and-release:
-    needs: release-checks
+    needs: [release-checks, validate-version]
     runs-on: ubuntu-latest
     environment: build
     
