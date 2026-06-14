@@ -58,7 +58,7 @@ jobs:
           VERSION_NAME=${TAG_NAME#v}
           
           IFS='.' read -r MAJOR MINOR <<< "$VERSION_NAME"
-          VERSION_CODE=$((MAJOR * 10 + MINOR))
+          VERSION_CODE=$((MAJOR * 100 + MINOR))
           
           sed -i "s/versionCode = [0-9]*/versionCode = $VERSION_CODE/" app/build.gradle.kts
           sed -i "s/versionName = \"[^\"]*\"/versionName = \"$VERSION_NAME\"/" app/build.gradle.kts
