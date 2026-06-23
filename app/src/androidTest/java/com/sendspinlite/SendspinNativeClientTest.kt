@@ -18,12 +18,13 @@ class SendspinNativeClientTest {
     @Test
     fun createAndDestroy_doesNotCrash() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val client = SendspinNativeClient(
-            wsUrl = "ws://127.0.0.1:8927/sendspin",
-            clientId = "test-client",
-            clientName = "Test Client",
-            context = context,
-        )
+        val client =
+            SendspinNativeClient(
+                wsUrl = "ws://127.0.0.1:8927/sendspin",
+                clientId = "test-client",
+                clientName = "Test Client",
+                context = context,
+            )
         try {
             val diagnostics = client.diagnostics.value
             assertEquals("idle", diagnostics.status)

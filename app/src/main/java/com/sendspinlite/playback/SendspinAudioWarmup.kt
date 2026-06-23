@@ -2,8 +2,8 @@ package com.sendspinlite.playback
 
 import android.content.Context
 import android.util.Log
-import kotlinx.coroutines.delay
 import com.sendspinlite.system.SendspinSystemUtils
+import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicBoolean
 
 object SendspinAudioWarmup {
@@ -15,7 +15,11 @@ object SendspinAudioWarmup {
 
     private val warmupInProgress = AtomicBoolean(false)
 
-    suspend fun runIfNeeded(context: Context, output: PcmAudioOutput, tag: String) {
+    suspend fun runIfNeeded(
+        context: Context,
+        output: PcmAudioOutput,
+        tag: String,
+    ) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val currentVersionCode = SendspinSystemUtils.getCurrentVersionCode(context, tag)
         val warmedVersion = prefs.getLong(KEY_AUDIO_WARMUP_LAST_VERSION_CODE, -1L)

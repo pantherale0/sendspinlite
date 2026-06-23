@@ -12,13 +12,13 @@ import android.os.IBinder
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import com.sendspinlite.diagnostics.CrashReportingManager
 import com.sendspinlite.network.DiscoveredServer
 import com.sendspinlite.network.ServiceDiscovery
 import com.sendspinlite.playback.PlaybackDiagnostics
 import com.sendspinlite.service.SendspinService
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
@@ -262,7 +262,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-
     }
 
     override fun onCleared() {
@@ -306,6 +305,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
         _ui.value = _ui.value.copy(connected = false, status = "disconnected")
     }
+
     fun setStaticDelayMs(ms: Long) {
         val clamped = ms.coerceIn(0L, 5000L)
         // Save to SharedPreferences for persistence

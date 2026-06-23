@@ -8,11 +8,14 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import com.sendspinlite.BuildConfig
 import android.util.Log
+import com.sendspinlite.BuildConfig
 
 object SendspinSystemUtils {
-    fun checkIsLowMemoryDevice(context: Context, tag: String): Boolean {
+    fun checkIsLowMemoryDevice(
+        context: Context,
+        tag: String,
+    ): Boolean {
         return try {
             val activityManager =
                 context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -29,7 +32,10 @@ object SendspinSystemUtils {
         }
     }
 
-    fun getConnectionType(context: Context, tag: String): String {
+    fun getConnectionType(
+        context: Context,
+        tag: String,
+    ): String {
         return try {
             val connectivityManager =
                 context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -56,7 +62,10 @@ object SendspinSystemUtils {
         }
     }
 
-    fun getActualSystemVolume(context: Context, tag: String): Int {
+    fun getActualSystemVolume(
+        context: Context,
+        tag: String,
+    ): Int {
         return try {
             val audioManager =
                 context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
@@ -111,7 +120,10 @@ object SendspinSystemUtils {
         }
     }
 
-    fun getCurrentVersionCode(context: Context, tag: String): Long {
+    fun getCurrentVersionCode(
+        context: Context,
+        tag: String,
+    ): Long {
         return try {
             val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {

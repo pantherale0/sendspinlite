@@ -1,7 +1,7 @@
 package com.sendspinlite.client
 
-import com.sendspinlite.playback.PlaybackDiagnostics
 import android.graphics.Bitmap
+import com.sendspinlite.playback.PlaybackDiagnostics
 
 /**
  * Decoupled diagnostics snapshot representing the current client playback/network state.
@@ -57,7 +57,6 @@ data class ClientDiagnostics(
     val playerMutedFromServer: Boolean = false,
     val staticDelayMs: Long = 0L,
     val staticDelayMsFromServer: Boolean = false,
-    
     // Metadata properties
     val metadataTimestamp: Long? = null,
     val trackTitle: String? = null,
@@ -72,7 +71,7 @@ data class ClientDiagnostics(
     val trackDuration: Long? = null,
     val playbackSpeed: Int? = null,
     val repeatMode: String? = null,
-    val shuffleEnabled: Boolean? = null
+    val shuffleEnabled: Boolean? = null,
 )
 
 /**
@@ -80,6 +79,8 @@ data class ClientDiagnostics(
  */
 sealed interface ClientEvent {
     data class ServerVolumeChanged(val volume: Int) : ClientEvent
+
     data class ServerMutedChanged(val muted: Boolean) : ClientEvent
+
     data class ServerStaticDelayChanged(val delayMs: Long) : ClientEvent
 }

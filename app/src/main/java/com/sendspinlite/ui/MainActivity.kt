@@ -1,7 +1,6 @@
 package com.sendspinlite.ui
 
 import android.Manifest
-import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -27,17 +26,17 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.content.edit
 import androidx.core.view.WindowCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
-import java.text.SimpleDateFormat
 import com.sendspinlite.BuildConfig
 import com.sendspinlite.R
 import com.sendspinlite.diagnostics.AudioIssueReporter
 import com.sendspinlite.diagnostics.CrashReportingManager
 import com.sendspinlite.playback.PlaybackDiagnostics
 import com.sendspinlite.system.SendspinSystemUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : ComponentActivity() {

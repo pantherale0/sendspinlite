@@ -5,6 +5,9 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.sendspinlite.BuildConfig
+import com.sendspinlite.playback.PlaybackDiagnostics
+import com.sendspinlite.ui.PlayerViewModel
 import io.sentry.Attachment
 import io.sentry.Hint
 import io.sentry.Sentry
@@ -14,10 +17,6 @@ import io.sentry.protocol.SentryId
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
-import com.sendspinlite.BuildConfig
-import com.sendspinlite.playback.PcmAudioOutput
-import com.sendspinlite.playback.PlaybackDiagnostics
-import com.sendspinlite.ui.PlayerViewModel
 import java.util.Locale
 
 /**

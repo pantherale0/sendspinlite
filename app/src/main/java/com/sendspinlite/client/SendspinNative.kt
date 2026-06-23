@@ -10,9 +10,17 @@ import java.nio.ByteBuffer
  */
 internal interface SendspinNativeCallbacks {
     /** Writes decoded PCM to the platform output, returning the number of bytes written. */
-    fun onAudioWrite(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int
+    fun onAudioWrite(
+        buffer: ByteBuffer,
+        length: Int,
+        timeoutMs: Int,
+    ): Int
 
-    fun onStreamStart(sampleRate: Int, channels: Int, bitDepth: Int)
+    fun onStreamStart(
+        sampleRate: Int,
+        channels: Int,
+        bitDepth: Int,
+    )
 
     fun onStreamEnd()
 
@@ -37,7 +45,11 @@ internal interface SendspinNativeCallbacks {
 
     fun onMetadataClear()
 
-    fun onGroupUpdate(playbackState: String?, groupId: String?, groupName: String?)
+    fun onGroupUpdate(
+        playbackState: String?,
+        groupId: String?,
+        groupName: String?,
+    )
 
     fun onTimeSyncUpdated(errorUs: Float)
 
@@ -45,7 +57,10 @@ internal interface SendspinNativeCallbacks {
 
     fun onReleaseHighPerformance()
 
-    fun onConnectionState(status: String, connected: Boolean)
+    fun onConnectionState(
+        status: String,
+        connected: Boolean,
+    )
 
     fun isNetworkReady(): Boolean
 }
@@ -74,19 +89,38 @@ internal object SendspinNative {
 
     external fun nativeStart(handle: Long)
 
-    external fun nativeConnect(handle: Long, url: String)
+    external fun nativeConnect(
+        handle: Long,
+        url: String,
+    )
 
-    external fun nativeDisconnect(handle: Long, reason: Int)
+    external fun nativeDisconnect(
+        handle: Long,
+        reason: Int,
+    )
 
     external fun nativeDestroy(handle: Long)
 
-    external fun nativeNotifyAudioPlayed(handle: Long, frames: Int, finishTimestampUs: Long)
+    external fun nativeNotifyAudioPlayed(
+        handle: Long,
+        frames: Int,
+        finishTimestampUs: Long,
+    )
 
-    external fun nativeUpdateVolume(handle: Long, volume: Int)
+    external fun nativeUpdateVolume(
+        handle: Long,
+        volume: Int,
+    )
 
-    external fun nativeUpdateMuted(handle: Long, muted: Boolean)
+    external fun nativeUpdateMuted(
+        handle: Long,
+        muted: Boolean,
+    )
 
-    external fun nativeUpdateStaticDelay(handle: Long, delayMs: Int)
+    external fun nativeUpdateStaticDelay(
+        handle: Long,
+        delayMs: Int,
+    )
 
     external fun nativeIsConnected(handle: Long): Boolean
 

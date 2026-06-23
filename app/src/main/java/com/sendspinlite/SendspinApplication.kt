@@ -1,7 +1,7 @@
 package com.sendspinlite
 
-import com.sendspinlite.diagnostics.CrashReportingManager
 import android.app.Application
+import com.sendspinlite.diagnostics.CrashReportingManager
 
 /**
  * Custom Application class.

@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.util.Log
+import com.sendspinlite.BuildConfig
+import com.sendspinlite.SendspinApplication
 import io.sentry.Attachment
 import io.sentry.Hint
 import io.sentry.Sentry
@@ -16,8 +18,6 @@ import io.sentry.android.core.SentryAndroidOptions
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
-import com.sendspinlite.BuildConfig
-import com.sendspinlite.SendspinApplication
 import java.util.Locale
 
 /**

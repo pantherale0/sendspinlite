@@ -64,6 +64,7 @@ class PcmAudioOutput {
 
     // Last frame position reported to the native client, used to emit per-poll deltas.
     private var lastReportedFrames: Long = 0L
+
     @Volatile
     private var smoothedLatencyUs: Long = 0L
 
@@ -149,11 +150,12 @@ class PcmAudioOutput {
             // On high-latency devices (e.g. Snapdragon MSM8916, where minBuf is 80ms+), using a 4x multiplier
             // inflates the buffer to 400ms+ and forces the Android OS deep-buffer playback path, causing massive
             // hardware latency. Using a smaller 2x multiplier for these prevents triggering deep-buffer routing.
-            val minBufMs = if (safeSampleRate > 0 && bytesPerFrame > 0) {
-                (minBuf.toLong() * 1000L) / (safeSampleRate.toLong() * bytesPerFrame)
-            } else {
-                0L
-            }
+            val minBufMs =
+                if (safeSampleRate > 0 && bytesPerFrame > 0) {
+                    (minBuf.toLong() * 1000L) / (safeSampleRate.toLong() * bytesPerFrame)
+                } else {
+                    0L
+                }
             val multiplier = if (minBufMs > 40L) 2 else 4
 
             // Use at least 250ms buffer, or multiplier * safeMinBuf, whichever is larger, to ensure stability
@@ -340,7 +342,11 @@ class PcmAudioOutput {
      * [timeoutMs], and return the number of bytes actually written. The buffer's position is
      * advanced by the number of bytes consumed.
      */
-    fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int {
+    fun writePcm(
+        buffer: ByteBuffer,
+        length: Int,
+        timeoutMs: Int,
+    ): Int {
         if (length <= 0) return 0
         if (!started.get()) return 0
 
@@ -891,5 +897,4 @@ class PcmAudioOutput {
             format.bitDepth,
         )
     }
-
 }

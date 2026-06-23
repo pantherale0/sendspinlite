@@ -40,7 +40,6 @@ class SendspinNativeClient(
     private val clientName: String,
     private val context: Context,
 ) : SendspinNativeCallbacks {
-
     private val tag = "SendspinNativeClient"
 
     private val _diagnostics = MutableStateFlow(ClientDiagnostics())
@@ -62,16 +61,20 @@ class SendspinNativeClient(
 
     // Native handle ownership. Access is guarded by handleLock; 0 means not created / destroyed.
     private val handleLock = Any()
+
     @Volatile
     private var handle: Long = 0L
     private val started = AtomicBoolean(false)
 
     @Volatile
     private var status: String = "idle"
+
     @Volatile
     private var pendingStaticDelayMs: Long = 0L
+
     @Volatile
     private var firstTimeSyncedAtMs: Long = 0L
+
     @Volatile
     private var lastDiagnosticsUpdateMs: Long = System.currentTimeMillis()
 
@@ -80,17 +83,18 @@ class SendspinNativeClient(
 
     init {
         synchronized(handleLock) {
-            handle = SendspinNative.nativeCreate(
-                callbacks = this,
-                clientId = clientId,
-                name = clientName,
-                productName = PRODUCT_NAME,
-                manufacturer = Build.MANUFACTURER ?: "Android",
-                softwareVersion = SOFTWARE_VERSION,
-                fixedDelayUs = BASELINE_FIXED_DELAY_US,
-                audioBufferCapacity = AUDIO_BUFFER_CAPACITY,
-                initialStaticDelayMs = 0,
-            )
+            handle =
+                SendspinNative.nativeCreate(
+                    callbacks = this,
+                    clientId = clientId,
+                    name = clientName,
+                    productName = PRODUCT_NAME,
+                    manufacturer = Build.MANUFACTURER ?: "Android",
+                    softwareVersion = SOFTWARE_VERSION,
+                    fixedDelayUs = BASELINE_FIXED_DELAY_US,
+                    audioBufferCapacity = AUDIO_BUFFER_CAPACITY,
+                    initialStaticDelayMs = 0,
+                )
         }
         updateDiagnostics {
             it.copy(
@@ -344,12 +348,20 @@ class SendspinNativeClient(
     // SendspinNativeCallbacks (from native threads)
     // ========================================================================
 
-    override fun onAudioWrite(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int {
+    override fun onAudioWrite(
+        buffer: ByteBuffer,
+        length: Int,
+        timeoutMs: Int,
+    ): Int {
         if (!output.isStarted()) return 0
         return output.writePcm(buffer, length, timeoutMs)
     }
 
-    override fun onStreamStart(sampleRate: Int, channels: Int, bitDepth: Int) {
+    override fun onStreamStart(
+        sampleRate: Int,
+        channels: Int,
+        bitDepth: Int,
+    ) {
         Log.i(tag, "Stream start sr=$sampleRate ch=$channels bd=$bitDepth")
         output.start(sampleRate, channels, bitDepth)
         output.syncPlaybackFeedbackBaseline()
@@ -427,7 +439,11 @@ class SendspinNativeClient(
         }
     }
 
-    override fun onGroupUpdate(playbackState: String?, groupId: String?, groupName: String?) {
+    override fun onGroupUpdate(
+        playbackState: String?,
+        groupId: String?,
+        groupName: String?,
+    ) {
         updateDiagnostics {
             it.copy(
                 groupName = groupName ?: it.groupName,
@@ -472,7 +488,10 @@ class SendspinNativeClient(
         }
     }
 
-    override fun onConnectionState(status: String, connected: Boolean) {
+    override fun onConnectionState(
+        status: String,
+        connected: Boolean,
+    ) {
         this.status = status
         if (!connected) {
             firstTimeSyncedAtMs = 0L
@@ -509,8 +528,9 @@ class SendspinNativeClient(
 
     override fun isNetworkReady(): Boolean {
         return try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                ?: return true
+            val cm =
+                context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    ?: return true
             val network = cm.activeNetwork ?: return false
             val caps = cm.getNetworkCapabilities(network) ?: return false
             caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -523,13 +543,16 @@ class SendspinNativeClient(
     companion object {
         private const val PRODUCT_NAME = "SendSpin Android"
         private const val SOFTWARE_VERSION = "1.7"
+
         // Platform pipeline delay is tracked via notify_audio_played feedback, not fixed_delay.
         private const val BASELINE_FIXED_DELAY_US = 0
         private const val AUDIO_BUFFER_CAPACITY = 2_000_000L
         private const val FEEDBACK_INTERVAL_MS = 5L
         private const val DIAGNOSTICS_INTERVAL_MS = 250L
+
         /** Nominal chunk duration used for output-queue → chunk count UI mapping. */
         private const val CHUNK_MS = 20L
+
         /** Roles compiled into the native client (player + metadata). */
         private const val ACTIVE_ROLES = "player, metadata"
     }
@@ -542,7 +565,10 @@ class SendspinNativeClient(
             else -> "POOR"
         }
 
-    private fun deriveClockStability(timeSynced: Boolean, clockUpdateCount: Int): String {
+    private fun deriveClockStability(
+        timeSynced: Boolean,
+        clockUpdateCount: Int,
+    ): String {
         if (!timeSynced || clockUpdateCount == 0) return "UNSTABLE"
         val anchorMs = firstTimeSyncedAtMs
         if (anchorMs == 0L) return "UNSTABLE"

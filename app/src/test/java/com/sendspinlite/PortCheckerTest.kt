@@ -1,12 +1,12 @@
 package com.sendspinlite
 
 import com.google.common.truth.Truth.assertThat
+import com.sendspinlite.network.PortChecker
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.Test
 import java.util.concurrent.Executors
-import com.sendspinlite.network.PortChecker
 import java.util.concurrent.atomic.AtomicReference
 
 class PortCheckerTest {
