@@ -72,6 +72,8 @@ class SendspinNativeClient(
     private var pendingStaticDelayMs: Long = 0L
     @Volatile
     private var firstTimeSyncedAtMs: Long = 0L
+    @Volatile
+    private var lastDiagnosticsUpdateMs: Long = System.currentTimeMillis()
 
     private var feedbackJob: Job? = null
     private var diagnosticsJob: Job? = null
@@ -221,10 +223,11 @@ class SendspinNativeClient(
 
     fun trimAudioBufferLow() = Log.i(tag, "trimAudioBufferLow: no-op (native ring buffer)")
 
-    fun isHealthy(): Boolean =
-        withHandle { h ->
-            SendspinNative.nativeIsConnected(h) && SendspinNative.nativeIsTimeSynced(h)
-        } == true
+    fun isHealthy(): Boolean {
+        if (!started.get()) return true
+        val elapsed = System.currentTimeMillis() - lastDiagnosticsUpdateMs
+        return elapsed < 10000L
+    }
 
     /**
      * Runs [block] with the native handle while holding [handleLock].
@@ -292,6 +295,7 @@ class SendspinNativeClient(
     }
 
     private fun publishDiagnostics(snapshot: DiagnosticsSnapshot) {
+        lastDiagnosticsUpdateMs = System.currentTimeMillis()
         val outputStarted = output.isStarted()
         val outputQueueMs = if (outputStarted) output.getOutputQueueMs() else 0L
         val latencyMs = if (outputStarted) output.getSmoothedLatencyMs() else 0.0

@@ -29,6 +29,9 @@ import com.sendspinlite.client.SendspinNativeClient
 import com.sendspinlite.ui.MainActivity
 import com.sendspinlite.ui.PlayerViewModel
 import kotlinx.coroutines.flow.StateFlow
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
+import androidx.media.app.NotificationCompat.MediaStyle
 
 class SendspinService : Service() {
     private val tag = "SendspinService"
@@ -37,6 +40,7 @@ class SendspinService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var client: SendspinNativeClient? = null
+    private var mediaSession: MediaSessionCompat? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
@@ -213,6 +217,18 @@ class SendspinService : Service() {
                 }
             }
         }
+
+        // Initialize MediaSessionCompat for Android 14+ foreground service compliance
+        mediaSession = MediaSessionCompat(this, "SendspinMediaSession").apply {
+            isActive = true
+        }
+
+        // Keep MediaSession state in sync with UI/playback state
+        scope.launch {
+            _uiState.collect {
+                updateMediaSessionState()
+            }
+        }
     }
 
     override fun onStartCommand(
@@ -261,7 +277,7 @@ class SendspinService : Service() {
             // Disconnect existing connection before creating new one
             if (client != null) {
                 Log.i(tag, "Disconnecting existing client before reconnecting")
-                disconnect()
+                disconnect(keepForeground = true)
             }
 
             connect(wsUrl, clientId, clientName, fromBoot = fromBoot)
@@ -278,6 +294,9 @@ class SendspinService : Service() {
     override fun onDestroy() {
         Log.i(tag, "Service destroyed")
         disconnect()
+
+        mediaSession?.release()
+        mediaSession = null
 
         // Unregister memory trim callbacks to prevent leaking this service
         memoryTrimCallback?.let { unregisterComponentCallbacks(it) }
@@ -417,7 +436,39 @@ class SendspinService : Service() {
             }
         }
 
+        mediaSession?.let { session ->
+            builder.setStyle(
+                MediaStyle()
+                    .setMediaSession(session.sessionToken)
+                    .setShowActionsInCompactView(*actionIndices.toIntArray())
+            )
+        }
+
         return builder.build()
+    }
+
+    private fun updateMediaSessionState() {
+        val session = mediaSession ?: return
+        val state = _uiState.value
+        val playState = when (state.playbackState) {
+            "playing" -> PlaybackStateCompat.STATE_PLAYING
+            "stopped" -> PlaybackStateCompat.STATE_STOPPED
+            "paused" -> PlaybackStateCompat.STATE_PAUSED
+            else -> {
+                if (state.connected) PlaybackStateCompat.STATE_BUFFERING else PlaybackStateCompat.STATE_NONE
+            }
+        }
+
+        val playbackState = PlaybackStateCompat.Builder()
+            .setState(playState, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+            .setActions(
+                PlaybackStateCompat.ACTION_PLAY or
+                PlaybackStateCompat.ACTION_PAUSE or
+                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+            )
+            .build()
+        session.setPlaybackState(playbackState)
     }
 
     private fun createMediaActionIntent(action: String): PendingIntent {
@@ -475,7 +526,7 @@ class SendspinService : Service() {
         reconnectJob?.cancel()
         reconnectJob = null
 
-        disconnect()
+        disconnect(keepForeground = true)
 
         // Acquire wake lock and wifi lock when connecting
         wakeLock?.acquire()
@@ -703,7 +754,7 @@ class SendspinService : Service() {
         }
     }
 
-    fun disconnect() {
+    fun disconnect(keepForeground: Boolean = false) {
         try {
             client?.close("user_disconnect")
         } catch (e: Exception) {
@@ -735,21 +786,25 @@ class SendspinService : Service() {
         reconnectRetryCount = 0
 
         // Release wake lock and wifi lock when disconnecting
-        wakeLock?.let {
-            if (it.isHeld) {
-                it.release()
+        if (!keepForeground) {
+            wakeLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                }
             }
-        }
-        wifiLock?.let {
-            if (it.isHeld) {
-                it.release()
+            wifiLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                }
             }
         }
 
         _uiState.value = _uiState.value.copy(connected = false, status = "disconnected")
         updateNotification()
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        if (!keepForeground) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
     }
 
     private fun startAutoReconnect(
