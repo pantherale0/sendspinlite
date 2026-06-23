@@ -4,7 +4,7 @@
   <CurrentIssues>
     <ID>ComplexCondition:PcmAudioOutput.kt$PcmAudioOutput$existingTrack != null &amp;&amp; currentSampleRate == sampleRate &amp;&amp; currentChannels == channels &amp;&amp; currentBitDepth == bitDepth &amp;&amp; existingTrack.state == AudioTrack.STATE_INITIALIZED</ID>
     <ID>ComplexCondition:SendspinService.kt$SendspinService$client != null &amp;&amp; _uiState.value.wsUrl == wsUrl &amp;&amp; _uiState.value.clientId == clientId &amp;&amp; (_uiState.value.connected || _uiState.value.status.startsWith("connecting"))</ID>
-    <ID>ComplexCondition:SendspinService.kt$SendspinService.&lt;no name provided&gt;$(currentState.status.startsWith("failure:") || !currentState.connected) &amp;&amp; !currentState.wsUrl.isBlank() &amp;&amp; !currentState.clientId.isBlank() &amp;&amp; !currentState.clientName.isBlank()</ID>
+    <ID>ComplexCondition:SendspinService.kt$SendspinService.&lt;no name provided&gt;$(currentState.status == "network_lost" || currentState.status.startsWith("failure:") || currentState.status.startsWith("closed:")) &amp;&amp; !currentState.wsUrl.isBlank() &amp;&amp; !currentState.clientId.isBlank() &amp;&amp; !currentState.clientName.isBlank()</ID>
     <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
@@ -116,6 +116,7 @@
     <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$48_000</ID>
     <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$8</ID>
     <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$100</ID>
+    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$10000L</ID>
     <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$1_000L</ID>
     <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$5000L</ID>
     <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$5_000L</ID>
@@ -155,7 +156,8 @@
     <ID>MaxLineLength:SendspinService.kt$SendspinService$Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SendspinService::WifiLock")</ID>
-    <ID>MaxLineLength:SendspinService.kt$SendspinService.&lt;no name provided&gt;$connect(currentState.wsUrl, currentState.clientId, currentState.clientName, fromBoot = false)</ID>
+    <ID>MaxLineLength:SendspinService.kt$SendspinService.&lt;no name provided&gt;$connect(freshState.wsUrl, freshState.clientId, freshState.clientName, fromBoot = false)</ID>
+    <ID>MaxLineLength:SendspinService.kt$SendspinService.&lt;no name provided&gt;$if</ID>
     <ID>MaxLineLength:ServiceDiscovery.kt$ServiceDiscovery.&lt;no name provided&gt;$Log.i(tag, "Added server: ${discoveredServer.name} at $url. Total servers: ${_discoveredServers.value.size}")</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun selectHighestNativePcmFormat( context: Context, sampleRateCandidates: List&lt;Int&gt;, channelCandidates: List&lt;Int&gt;, bitDepthCandidates: List&lt;Int&gt;, ): PcmFormat?</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
@@ -180,6 +182,7 @@
     <ID>ReturnCount:SendspinService.kt$SendspinService$override fun onStartCommand( intent: Intent?, flags: Int, startId: Int, ): Int</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$private fun isNetworkAvailable(): Boolean</ID>
     <ID>ReturnCount:SendspinSystemUtils.kt$SendspinSystemUtils$fun isBatteryOptimizationIgnored(context: Context): Boolean</ID>
+    <ID>SpreadOperator:SendspinService.kt$SendspinService$(*actionIndices.toIntArray())</ID>
     <ID>SwallowedException:PcmAudioOutput.kt$PcmAudioOutput$e: UnsupportedOperationException</ID>
     <ID>SwallowedException:PlayerViewModel.kt$PlayerViewModel$e: Exception</ID>
     <ID>SwallowedException:PortChecker.kt$PortChecker$e: SocketTimeoutException</ID>
