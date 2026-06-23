@@ -7,7 +7,7 @@
     <ID>ComplexCondition:SendspinService.kt$SendspinService.&lt;no name provided&gt;$(currentState.status == "network_lost" || currentState.status.startsWith("failure:") || currentState.status.startsWith("closed:")) &amp;&amp; !currentState.wsUrl.isBlank() &amp;&amp; !currentState.clientId.isBlank() &amp;&amp; !currentState.clientName.isBlank()</ID>
     <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
-    <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
+    <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm( buffer: ByteBuffer, length: Int, timeoutMs: Int, ): Int</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
@@ -28,9 +28,9 @@
     <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>LongMethod:MainActivity.kt$private fun exportAndShareLogs( context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -&gt; Unit, )</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
-    <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
+    <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm( buffer: ByteBuffer, length: Int, timeoutMs: Int, ): Int</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
-    <ID>LongMethod:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded(context: Context, output: PcmAudioOutput, tag: String)</ID>
+    <ID>LongMethod:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded( context: Context, output: PcmAudioOutput, tag: String, )</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
     <ID>LongParameterList:SendspinNative.kt$SendspinNative$( callbacks: SendspinNativeCallbacks, clientId: String, name: String, productName: String, manufacturer: String, softwareVersion: String, fixedDelayUs: Int, audioBufferCapacity: Long, initialStaticDelayMs: Int, )</ID>
@@ -153,6 +153,7 @@
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$deviceId = Settings.Secure.getString(getApplication&lt;Application&gt;().contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$val activityManager = getApplication&lt;Application&gt;().getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager</ID>
     <ID>MaxLineLength:SendspinAudioWarmup.kt$SendspinAudioWarmup$"Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}"</ID>
+    <ID>MaxLineLength:SendspinService.kt$SendspinService$Log.i(tag, "Applied server volume command: ${event.volume}% (systemVolume=$systemVolume)")</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SendspinService::WifiLock")</ID>
@@ -160,25 +161,25 @@
     <ID>MaxLineLength:SendspinService.kt$SendspinService.&lt;no name provided&gt;$if</ID>
     <ID>MaxLineLength:ServiceDiscovery.kt$ServiceDiscovery.&lt;no name provided&gt;$Log.i(tag, "Added server: ${discoveredServer.name} at $url. Total servers: ${_discoveredServers.value.size}")</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun selectHighestNativePcmFormat( context: Context, sampleRateCandidates: List&lt;Int&gt;, channelCandidates: List&lt;Int&gt;, bitDepthCandidates: List&lt;Int&gt;, ): PcmFormat?</ID>
-    <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
+    <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm( buffer: ByteBuffer, length: Int, timeoutMs: Int, ): Int</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>NestedBlockDepth:PcmAudioOutput.kt$PcmAudioOutput$private fun stopInternal(t: AudioTrack?)</ID>
-    <ID>NestedBlockDepth:SendspinSystemUtils.kt$SendspinSystemUtils$fun getConnectionType(context: Context, tag: String): String</ID>
+    <ID>NestedBlockDepth:SendspinSystemUtils.kt$SendspinSystemUtils$fun getConnectionType( context: Context, tag: String, ): String</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun getEstimatedPipelineLatencyUs(): Long</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun getOutputQueueMs(): Long</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun getPlaybackProgress(nowUs: Long): PlaybackProgress?</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun setPlaybackSpeed(speed: Float)</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
-    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(buffer: ByteBuffer, length: Int, timeoutMs: Int): Int</ID>
+    <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm( buffer: ByteBuffer, length: Int, timeoutMs: Int, ): Int</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>ReturnCount:PcmAudioOutput.kt$PcmAudioOutput$private fun snapshotPresentedFramesLocked(nowNs: Long): Long</ID>
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun buildPlaybackFormat( sampleRate: Int, channels: Int, bitDepth: Int, ): AudioFormat?</ID>
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun getMinBufferSizeIfSupported( sampleRate: Int, channels: Int, bitDepth: Int, ): Int</ID>
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun isPlaybackFormatSupported( sampleRate: Int, channels: Int, bitDepth: Int, ): Boolean</ID>
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$private fun isStructurallyValid(format: AudioFormat): Boolean</ID>
-    <ID>ReturnCount:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded(context: Context, output: PcmAudioOutput, tag: String)</ID>
+    <ID>ReturnCount:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded( context: Context, output: PcmAudioOutput, tag: String, )</ID>
     <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$override fun isNetworkReady(): Boolean</ID>
-    <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$private fun deriveClockStability(timeSynced: Boolean, clockUpdateCount: Int): String</ID>
+    <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$private fun deriveClockStability( timeSynced: Boolean, clockUpdateCount: Int, ): String</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$override fun onStartCommand( intent: Intent?, flags: Int, startId: Int, ): Int</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$private fun isNetworkAvailable(): Boolean</ID>
     <ID>ReturnCount:SendspinSystemUtils.kt$SendspinSystemUtils$fun isBatteryOptimizationIgnored(context: Context): Boolean</ID>
