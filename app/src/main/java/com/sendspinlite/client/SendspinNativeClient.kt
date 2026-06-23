@@ -119,7 +119,7 @@ class SendspinNativeClient(
                     true
                 }
             }
-        if (!connected) return
+        if (!connected || handle == 0L || !kotlin.coroutines.coroutineContext.isActive) return
 
         started.set(true)
         startFeedbackLoop()

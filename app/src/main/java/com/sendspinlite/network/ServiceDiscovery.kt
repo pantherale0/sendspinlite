@@ -7,6 +7,7 @@ import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ConcurrentHashMap
 
 data class DiscoveredServer(
     val name: String,
@@ -24,7 +25,7 @@ class ServiceDiscovery(private val context: Context) {
 
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     private var resolveListener: NsdManager.ResolveListener? = null
-    private val resolvedServers = mutableMapOf<String, DiscoveredServer>()
+    private val resolvedServers = ConcurrentHashMap<String, DiscoveredServer>()
 
     // Track if discovery has found and connected to a server
     private var discoveryComplete = false

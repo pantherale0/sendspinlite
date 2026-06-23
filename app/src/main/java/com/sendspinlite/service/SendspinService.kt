@@ -895,7 +895,7 @@ class SendspinService : Service() {
                             Log.i(tag, "Network restored, checking connection")
                             // Only attempt reconnect if we're NOT already connected or connecting
                             val currentState = _uiState.value
-                            if ((currentState.status.startsWith("failure:") || !currentState.connected) &&
+                            if ((currentState.status == "network_lost" || currentState.status.startsWith("failure:") || currentState.status.startsWith("closed:")) &&
                                 !currentState.wsUrl.isBlank() &&
                                 !currentState.clientId.isBlank() &&
                                 !currentState.clientName.isBlank()
@@ -905,7 +905,12 @@ class SendspinService : Service() {
                                 scope.launch {
                                     // Give network a moment to stabilize
                                     delay(1000)
-                                    connect(currentState.wsUrl, currentState.clientId, currentState.clientName, fromBoot = false)
+                                    // Verify that the current state is still suitable for reconnection
+                                    // (e.g. the user hasn't explicitly disconnected/reconnected in the meantime)
+                                    val freshState = _uiState.value
+                                    if (freshState.status == "network_lost" || freshState.status.startsWith("failure:") || freshState.status.startsWith("closed:")) {
+                                        connect(freshState.wsUrl, freshState.clientId, freshState.clientName, fromBoot = false)
+                                    }
                                 }
                             }
                         } else {
