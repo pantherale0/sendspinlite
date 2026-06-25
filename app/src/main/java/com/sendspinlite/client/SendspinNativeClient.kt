@@ -495,27 +495,14 @@ class SendspinNativeClient(
         this.status = status
         if (!connected) {
             firstTimeSyncedAtMs = 0L
-        } else {
-            withHandle { h ->
-                if (firstTimeSyncedAtMs == 0L && SendspinNative.nativeIsTimeSynced(h)) {
-                    firstTimeSyncedAtMs = System.currentTimeMillis()
-                }
-            }
         }
-        val timeSyncedForUi =
-            withHandle { h -> SendspinNative.nativeIsTimeSynced(h) } == true
         updateDiagnostics {
             it.copy(
                 status = status,
                 connected = connected,
                 activeRoles = if (connected) ACTIVE_ROLES else "",
                 networkQuality = if (connected) deriveNetworkQuality(it.offsetUncertaintyUs) else "UNKNOWN",
-                stability =
-                    if (connected) {
-                        deriveClockStability(timeSyncedForUi, it.clockUpdateCount)
-                    } else {
-                        "UNSTABLE"
-                    },
+                stability = "UNSTABLE",
             )
         }
         if (!connected) {

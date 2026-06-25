@@ -283,26 +283,11 @@ class PcmAudioOutput {
                         // Buffer full - yield and retry a few times then give up
                         zeroWriteCount++
                         if (zeroWriteCount > maxZeroWrites) {
-                            // Fallback: try one blocking write to drain the remaining bytes.
-                            // If even that fails, treat partial write as non-fatal to avoid
-                            // restart thrash loops at stream start.
-                            val remaining = pcm.size - off
-                            val blockingN = t.write(pcm, off, remaining, AudioTrack.WRITE_BLOCKING)
-                            if (blockingN < 0) {
-                                Log.w(tag, "AudioTrack blocking write returned error: $blockingN")
-                                markTrackDeadAndRelease(t, "blocking_write_error_$blockingN")
-                                return false
-                            }
-                            if (blockingN == 0) {
-                                Log.w(
-                                    tag,
-                                    "AudioTrack buffer remained full after retries; dropping tail (${pcm.size - off} bytes)",
-                                )
-                                return off > 0
-                            }
-                            off += blockingN
-                            zeroWriteCount = 0
-                            continue
+                            Log.w(
+                                tag,
+                                "AudioTrack buffer remained full after retries; dropping tail (${pcm.size - off} bytes)",
+                            )
+                            return off > 0
                         }
                         // Yield to other threads briefly
                         Thread.yield()
@@ -384,23 +369,8 @@ class PcmAudioOutput {
                     if (n == 0) {
                         zeroWriteCount++
                         if (zeroWriteCount > maxZeroWrites) {
-                            val blockingN =
-                                t.write(buffer, end - buffer.position(), AudioTrack.WRITE_BLOCKING)
-                            if (blockingN < 0) {
-                                Log.w(tag, "AudioTrack blocking write returned error: $blockingN")
-                                markTrackDeadAndRelease(t, "blocking_write_error_$blockingN")
-                                return written
-                            }
-                            if (blockingN == 0) {
-                                Log.w(tag, "AudioTrack buffer remained full; dropping ${end - buffer.position()} bytes")
-                                return written
-                            }
-                            written += blockingN
-                            if (bytesPerFrame > 0) {
-                                totalFramesWritten.addAndGet((blockingN / bytesPerFrame).toLong())
-                            }
-                            zeroWriteCount = 0
-                            continue
+                            Log.w(tag, "AudioTrack buffer remained full; dropping ${end - buffer.position()} bytes")
+                            return written
                         }
                         Thread.yield()
                         Thread.sleep(2)
