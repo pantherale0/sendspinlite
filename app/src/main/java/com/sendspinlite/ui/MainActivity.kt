@@ -240,7 +240,7 @@ private fun PlayerScreen(vm: PlayerViewModel) {
     fun onSaveAudioReport() {
         isCollectingAudioReport = true
         scope.launch(Dispatchers.IO) {
-            val report = AudioIssueReporter.buildReport(ui)
+            val report = AudioIssueReporter.buildReport(ui, context)
             val fileUri = AudioIssueReporter.saveReportToFile(context, report)
             withContext(Dispatchers.Main) {
                 isCollectingAudioReport = false
@@ -527,8 +527,8 @@ private fun PlayerScreen(vm: PlayerViewModel) {
                                 showAudioIssueDialog = false
                                 isCollectingAudioReport = true
                                 scope.launch(Dispatchers.IO) {
-                                    val report = AudioIssueReporter.buildReport(ui)
-                                    val eventId = AudioIssueReporter.uploadToSentry(report, ui)
+                                    val report = AudioIssueReporter.buildReport(ui, context)
+                                    val eventId = AudioIssueReporter.uploadToSentry(report, ui, context)
                                     withContext(Dispatchers.Main) {
                                         audioIssueSentryEventId = eventId
                                         isCollectingAudioReport = false

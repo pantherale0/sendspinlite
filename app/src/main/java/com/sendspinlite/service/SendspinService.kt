@@ -173,6 +173,14 @@ class SendspinService : Service() {
         isTV = checkIsTV()
         isLowMemoryDevice = checkIsLowMemoryDevice()
 
+        // Initialize UI state with current system volume and mute state
+        val initialVolume = getSystemMediaVolume()
+        val initialMute = getSystemMuteState()
+        _uiState.value = _uiState.value.copy(
+            playerVolume = initialVolume,
+            playerMuted = initialMute
+        )
+
         createNotificationChannel()
 
         // Acquire wake lock to keep CPU running during playback
@@ -586,6 +594,8 @@ class SendspinService : Service() {
             wifiLock?.let { if (it.isHeld) it.release() }
         }
         activeClient.setStaticDelayMs(_uiState.value.staticDelayMs)
+        activeClient.setPlayerVolume(_uiState.value.playerVolume)
+        activeClient.setPlayerMute(_uiState.value.playerMuted)
 
         // Listen to client diagnostics Flow.
         // Cancel any previous collector first so a reconnect cannot leak the prior client.
@@ -994,6 +1004,32 @@ class SendspinService : Service() {
             }
         } catch (e: Exception) {
             Log.w(tag, "Error checking network availability", e)
+            false
+        }
+    }
+
+    private fun getSystemMediaVolume(): Int {
+        return try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            (currentVolume * 100 / maxVolume).coerceIn(0, 100)
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to get system media volume", e)
+            100
+        }
+    }
+
+    private fun getSystemMuteState(): Boolean {
+        return try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                audioManager.isStreamMute(android.media.AudioManager.STREAM_MUSIC)
+            } else {
+                audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) == 0
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to get system mute state", e)
             false
         }
     }
