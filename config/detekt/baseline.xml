@@ -28,10 +28,10 @@
     <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>LongMethod:MainActivity.kt$private fun exportAndShareLogs( context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -&gt; Unit, )</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
-    <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm( buffer: ByteBuffer, length: Int, timeoutMs: Int, ): Int</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>LongMethod:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded( context: Context, output: PcmAudioOutput, tag: String, )</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
+    <ID>LongMethod:SendspinService.kt$SendspinService$override fun onCreate()</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
     <ID>LongParameterList:SendspinNative.kt$SendspinNative$( callbacks: SendspinNativeCallbacks, clientId: String, name: String, productName: String, manufacturer: String, softwareVersion: String, fixedDelayUs: Int, audioBufferCapacity: Long, initialStaticDelayMs: Int, )</ID>
     <ID>LongParameterList:SendspinNative.kt$SendspinNativeCallbacks$( title: String?, artist: String?, album: String?, albumArtist: String?, artworkUrl: String?, year: Int, track: Int, progressMs: Int, durationMs: Int, )</ID>
