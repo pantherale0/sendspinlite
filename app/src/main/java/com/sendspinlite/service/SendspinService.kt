@@ -208,9 +208,25 @@ class SendspinService : Service() {
         memoryTrimCallback = createMemoryTrimCallback()
         registerComponentCallbacks(memoryTrimCallback)
 
-        // Monitor connection state and auto-reconnect on failures
+        // Monitor connection state and auto-reconnect on failures, and manage wake lock
         scope.launch {
             _uiState.collect { state ->
+                // Manage wake lock dynamically based on playback status
+                val shouldHoldWakeLock = state.connected && state.playbackState == "playing"
+                wakeLock?.let { lock ->
+                    if (shouldHoldWakeLock) {
+                        if (!lock.isHeld) {
+                            lock.acquire()
+                            Log.i(tag, "WakeLock acquired dynamically (playing)")
+                        }
+                    } else {
+                        if (lock.isHeld) {
+                            lock.release()
+                            Log.i(tag, "WakeLock released dynamically (not playing)")
+                        }
+                    }
+                }
+
                 // If connection failed and we're not already retrying, start auto-reconnect
                 if (state.status.startsWith("failure:") && reconnectJob == null) {
                     Log.i(tag, "Connection failed, starting auto-reconnect")
@@ -532,8 +548,7 @@ class SendspinService : Service() {
 
         disconnect(keepForeground = true)
 
-        // Acquire wake lock and wifi lock when connecting
-        wakeLock?.acquire()
+        // Acquire wifi lock when connecting
         wifiLock?.acquire()
 
         // Start foreground service with retry logic for Android 12+ BOOT_COMPLETED restrictions
@@ -1117,22 +1132,24 @@ class SendspinService : Service() {
         return client.isHealthy()
     }
 
-    private suspend fun recoverService() {
-        try {
-            Log.i(tag, "Starting service recovery...")
-            client?.close("health_recovery")
-            delay(1000)
+    private fun recoverService() {
+        scope.launch {
+            try {
+                Log.i(tag, "Starting service recovery...")
+                client?.close("health_recovery")
+                delay(1000)
 
-            val wsUrl = _uiState.value.wsUrl
-            val clientId = _uiState.value.clientId
-            val clientName = _uiState.value.clientName
+                val wsUrl = _uiState.value.wsUrl
+                val clientId = _uiState.value.clientId
+                val clientName = _uiState.value.clientName
 
-            if (wsUrl.isNotBlank() && clientId.isNotBlank()) {
-                Log.i(tag, "Reconnecting after recovery...")
-                connect(wsUrl, clientId, clientName, fromBoot = false)
+                if (wsUrl.isNotBlank() && clientId.isNotBlank()) {
+                    Log.i(tag, "Reconnecting after recovery...")
+                    connect(wsUrl, clientId, clientName, fromBoot = false)
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Service recovery failed", e)
             }
-        } catch (e: Exception) {
-            Log.e(tag, "Service recovery failed", e)
         }
     }
 

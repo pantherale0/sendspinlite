@@ -27,6 +27,9 @@ class ServiceDiscovery(private val context: Context) {
     private var resolveListener: NsdManager.ResolveListener? = null
     private val resolvedServers = ConcurrentHashMap<String, DiscoveredServer>()
 
+    private val resolveQueue = ArrayDeque<NsdServiceInfo>()
+    private var isResolving = false
+
     // Track if discovery has found and connected to a server
     private var discoveryComplete = false
 
@@ -46,10 +49,12 @@ class ServiceDiscovery(private val context: Context) {
 
                 override fun onServiceFound(service: NsdServiceInfo) {
                     Log.i(tag, "Service discovered: ${service.serviceName}")
-                    // Resolve the service to get full details
-                    // All services found are _sendspin-server._tcp. so we resolve them all
-                    @Suppress("DEPRECATION")
-                    nsdManager.resolveService(service, getResolveListener())
+                    synchronized(resolveQueue) {
+                        resolveQueue.add(service)
+                        if (!isResolving) {
+                            resolveNextServiceLocked()
+                        }
+                    }
                 }
 
                 override fun onServiceLost(service: NsdServiceInfo) {
@@ -93,6 +98,22 @@ class ServiceDiscovery(private val context: Context) {
         }
     }
 
+    private fun resolveNextServiceLocked() {
+        val next = resolveQueue.removeFirstOrNull()
+        if (next != null) {
+            isResolving = true
+            try {
+                @Suppress("DEPRECATION")
+                nsdManager.resolveService(next, getResolveListener())
+            } catch (e: Exception) {
+                Log.e(tag, "Failed to submit resolve request for ${next.serviceName}", e)
+                resolveNextServiceLocked()
+            }
+        } else {
+            isResolving = false
+        }
+    }
+
     private fun getResolveListener(): NsdManager.ResolveListener {
         return object : NsdManager.ResolveListener {
             override fun onResolveFailed(
@@ -100,68 +121,69 @@ class ServiceDiscovery(private val context: Context) {
                 errorCode: Int,
             ) {
                 Log.e(tag, "Failed to resolve service: ${service.serviceName}, error code: $errorCode")
+                synchronized(resolveQueue) {
+                    resolveNextServiceLocked()
+                }
             }
 
             override fun onServiceResolved(service: NsdServiceInfo) {
-                // Stop discovery once we have at least one server
-                if (!discoveryComplete && _discoveredServers.value.isNotEmpty()) {
-                    discoveryComplete = true
-                    Log.i(tag, "First server found and resolved, stopping discovery")
-                    stopDiscovery()
-                    return
-                }
+                try {
+                    Log.i(tag, "Service resolved: ${service.serviceName}")
 
-                Log.i(tag, "Service resolved: ${service.serviceName}")
+                    @Suppress("DEPRECATION")
+                    val host = service.host?.hostAddress
+                    Log.d(tag, "Resolved host: $host, port: ${service.port}")
 
-                @Suppress("DEPRECATION")
-                val host = service.host?.hostAddress
-                Log.d(tag, "Resolved host: $host, port: ${service.port}")
-
-                if (host == null) {
-                    Log.w(tag, "Service ${service.serviceName} has no host address")
-                    return
-                }
-
-                val port = service.port
-                val properties = service.attributes
-
-                // Get path from TXT records, default to /sendspin
-                val pathBytes = properties?.get("path")
-                val path =
-                    if (pathBytes != null) {
-                        String(pathBytes, Charsets.UTF_8)
-                    } else {
-                        "/sendspin"
+                    if (host == null) {
+                        Log.w(tag, "Service ${service.serviceName} has no host address")
+                        return
                     }
 
-                val finalPath =
-                    if (path.isEmpty()) {
-                        "/sendspin"
-                    } else if (path.startsWith("/")) {
-                        path
-                    } else {
-                        "/$path"
+                    val port = service.port
+                    val properties = service.attributes
+
+                    // Get path from TXT records, default to /sendspin
+                    val pathBytes = properties?.get("path")
+                    val path =
+                        if (pathBytes != null) {
+                            String(pathBytes, Charsets.UTF_8)
+                        } else {
+                            "/sendspin"
+                        }
+
+                    val finalPath =
+                        if (path.isEmpty()) {
+                            "/sendspin"
+                        } else if (path.startsWith("/")) {
+                            path
+                        } else {
+                            "/$path"
+                        }
+                    val url = "ws://$host:$port$finalPath"
+
+                    val discoveredServer =
+                        DiscoveredServer(
+                            name = service.serviceName.removeSuffix("._sendspin-server._tcp."),
+                            url = url,
+                            host = host,
+                            port = port,
+                        )
+
+                    resolvedServers[service.serviceName] = discoveredServer
+                    _discoveredServers.value = resolvedServers.values.toList()
+
+                    Log.i(tag, "Added server: ${discoveredServer.name} at $url. Total servers: ${_discoveredServers.value.size}")
+
+                    // Stop discovery once we have the first server
+                    if (!discoveryComplete) {
+                        discoveryComplete = true
+                        Log.i(tag, "First server resolved, stopping discovery")
+                        stopDiscovery()
                     }
-                val url = "ws://$host:$port$finalPath"
-
-                val discoveredServer =
-                    DiscoveredServer(
-                        name = service.serviceName.removeSuffix("._sendspin-server._tcp."),
-                        url = url,
-                        host = host,
-                        port = port,
-                    )
-
-                resolvedServers[service.serviceName] = discoveredServer
-                _discoveredServers.value = resolvedServers.values.toList()
-
-                Log.i(tag, "Added server: ${discoveredServer.name} at $url. Total servers: ${_discoveredServers.value.size}")
-
-                // Stop discovery once we have the first server
-                if (!discoveryComplete) {
-                    discoveryComplete = true
-                    Log.i(tag, "First server resolved, stopping discovery")
-                    stopDiscovery()
+                } finally {
+                    synchronized(resolveQueue) {
+                        resolveNextServiceLocked()
+                    }
                 }
             }
         }
@@ -177,12 +199,20 @@ class ServiceDiscovery(private val context: Context) {
             }
         }
         discoveryListener = null
+        synchronized(resolveQueue) {
+            resolveQueue.clear()
+            isResolving = false
+        }
         // Don't clear servers - they stay available if we need to reconnect
     }
 
     fun resetDiscovery() {
         Log.i(tag, "Resetting discovery")
         discoveryComplete = false
+        synchronized(resolveQueue) {
+            resolveQueue.clear()
+            isResolving = false
+        }
         resolvedServers.clear()
         _discoveredServers.value = emptyList()
         startDiscovery()
