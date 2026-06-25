@@ -176,10 +176,11 @@ class SendspinService : Service() {
         // Initialize UI state with current system volume and mute state
         val initialVolume = getSystemMediaVolume()
         val initialMute = getSystemMuteState()
-        _uiState.value = _uiState.value.copy(
-            playerVolume = initialVolume,
-            playerMuted = initialMute
-        )
+        _uiState.value =
+            _uiState.value.copy(
+                playerVolume = initialVolume,
+                playerMuted = initialMute,
+            )
 
         createNotificationChannel()
 

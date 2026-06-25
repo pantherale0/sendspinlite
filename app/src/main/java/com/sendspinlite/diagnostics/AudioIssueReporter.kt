@@ -150,9 +150,10 @@ object AudioIssueReporter {
             val event =
                 SentryEvent().apply {
                     level = SentryLevel.WARNING
-                    message = io.sentry.protocol.Message().apply {
-                        message = "Audio issue report"
-                    }
+                    message =
+                        io.sentry.protocol.Message().apply {
+                            message = "Audio issue report"
+                        }
                     setExtra("audio_report_tail", lastLines(report, 50))
                     setExtra("app_version", BuildConfig.VERSION_NAME)
                     setExtra("android_version", Build.VERSION.RELEASE)
@@ -171,8 +172,8 @@ object AudioIssueReporter {
                 Attachment(
                     report.toByteArray(Charsets.UTF_8),
                     "audio_report.txt",
-                    "text/plain"
-                )
+                    "text/plain",
+                ),
             )
             val id: SentryId = Sentry.captureEvent(event, hint)
             val idStr = id.toString()
@@ -195,8 +196,9 @@ object AudioIssueReporter {
         }
         var result: Pair<Double, Double>? = null
         try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
-                as? android.net.ConnectivityManager
+            val cm =
+                context.getSystemService(Context.CONNECTIVITY_SERVICE)
+                    as? android.net.ConnectivityManager
             val activeNetwork = cm?.activeNetwork
             val capabilities = activeNetwork?.let { cm.getNetworkCapabilities(it) }
             if (capabilities != null) {
@@ -213,16 +215,19 @@ object AudioIssueReporter {
     private fun getWifiInfo(context: Context): WifiDetails? {
         var result: WifiDetails? = null
         try {
-            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE)
-                as? android.net.wifi.WifiManager
+            val wm =
+                context.applicationContext.getSystemService(Context.WIFI_SERVICE)
+                    as? android.net.wifi.WifiManager
+
             @Suppress("DEPRECATION")
             val wifiInfo = wm?.connectionInfo
             if (wifiInfo != null) {
-                result = WifiDetails(
-                    frequency = wifiInfo.frequency,
-                    linkSpeed = wifiInfo.linkSpeed,
-                    rssi = wifiInfo.rssi
-                )
+                result =
+                    WifiDetails(
+                        frequency = wifiInfo.frequency,
+                        linkSpeed = wifiInfo.linkSpeed,
+                        rssi = wifiInfo.rssi,
+                    )
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get Wi-Fi info", e)
@@ -233,7 +238,7 @@ object AudioIssueReporter {
     private fun appendSystemAndNetworkInfo(
         sb: StringBuilder,
         uiState: PlayerViewModel.UiState,
-        context: Context?
+        context: Context?,
     ) {
         sb.appendLine("=== AUDIO CONFIGURATION ===")
         sb.appendLine("Codec             : PCM")
@@ -272,12 +277,13 @@ object AudioIssueReporter {
 
         val freq = wifi.frequency
         if (freq > 0) {
-            val band = when {
-                freq in BAND_2_4_MIN..BAND_2_4_MAX -> "2.4 GHz"
-                freq in BAND_5_MIN..BAND_5_MAX -> "5 GHz"
-                freq in BAND_6_MIN..BAND_6_MAX -> "6 GHz"
-                else -> "unknown band"
-            }
+            val band =
+                when {
+                    freq in BAND_2_4_MIN..BAND_2_4_MAX -> "2.4 GHz"
+                    freq in BAND_5_MIN..BAND_5_MAX -> "5 GHz"
+                    freq in BAND_6_MIN..BAND_6_MAX -> "6 GHz"
+                    else -> "unknown band"
+                }
             sb.appendLine("Wi-Fi Frequency      : $freq MHz ($band)")
         }
         if (wifi.linkSpeed > 0) {
@@ -289,7 +295,7 @@ object AudioIssueReporter {
 
     private fun appendPipelineAndTimingDiagnostics(
         sb: StringBuilder,
-        uiState: PlayerViewModel.UiState
+        uiState: PlayerViewModel.UiState,
     ) {
         sb.appendLine("=== AUDIO PIPELINE STATISTICS ===")
         sb.appendLine("Playback State    : ${uiState.playbackState.ifBlank { "-" }}")
@@ -336,16 +342,19 @@ object AudioIssueReporter {
         sb.appendLine()
     }
 
-    private fun setSentryNetworkExtras(event: SentryEvent, context: Context) {
+    private fun setSentryNetworkExtras(
+        event: SentryEvent,
+        context: Context,
+    ) {
         val bandwidth = getNetworkBandwidthInfo(context)
         if (bandwidth != null) {
             event.setExtra(
                 "net_downstream_bandwidth_kbps",
-                (bandwidth.first * 1000.0).toInt().toString()
+                (bandwidth.first * 1000.0).toInt().toString(),
             )
             event.setExtra(
                 "net_upstream_bandwidth_kbps",
-                (bandwidth.second * 1000.0).toInt().toString()
+                (bandwidth.second * 1000.0).toInt().toString(),
             )
         }
 
@@ -361,7 +370,10 @@ object AudioIssueReporter {
         }
     }
 
-    private fun setSentryDiagnosticsExtras(event: SentryEvent, state: PlayerViewModel.UiState) {
+    private fun setSentryDiagnosticsExtras(
+        event: SentryEvent,
+        state: PlayerViewModel.UiState,
+    ) {
         // Pipeline Status
         event.setExtra("playback_state", state.playbackState)
         event.setExtra("playback_recovery_status", state.playbackRecoveryStatus)
