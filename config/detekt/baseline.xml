@@ -24,7 +24,6 @@
     <ID>InvalidPackageDeclaration:FrameworkResumeCrashTest.kt$package com.sendspinlite.ui</ID>
     <ID>LargeClass:PcmAudioOutput.kt$PcmAudioOutput</ID>
     <ID>LargeClass:SendspinService.kt$SendspinService : Service</ID>
-    <ID>LongMethod:AudioIssueReporter.kt$AudioIssueReporter$fun buildReport(uiState: PlayerViewModel.UiState): String</ID>
     <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>LongMethod:MainActivity.kt$private fun exportAndShareLogs( context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -&gt; Unit, )</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
