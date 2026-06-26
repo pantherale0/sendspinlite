@@ -5,12 +5,14 @@
     <ID>ComplexCondition:PcmAudioOutput.kt$PcmAudioOutput$existingTrack != null &amp;&amp; currentSampleRate == sampleRate &amp;&amp; currentChannels == channels &amp;&amp; currentBitDepth == bitDepth &amp;&amp; existingTrack.state == AudioTrack.STATE_INITIALIZED</ID>
     <ID>ComplexCondition:SendspinService.kt$SendspinService$client != null &amp;&amp; _uiState.value.wsUrl == wsUrl &amp;&amp; _uiState.value.clientId == clientId &amp;&amp; (_uiState.value.connected || _uiState.value.status.startsWith("connecting"))</ID>
     <ID>ComplexCondition:SendspinService.kt$SendspinService.&lt;no name provided&gt;$(currentState.status == "network_lost" || currentState.status.startsWith("failure:") || currentState.status.startsWith("closed:")) &amp;&amp; !currentState.wsUrl.isBlank() &amp;&amp; !currentState.clientId.isBlank() &amp;&amp; !currentState.clientName.isBlank()</ID>
+    <ID>CyclomaticComplexMethod:DiagnosticsDelta.kt$DiagnosticsDelta$fun fullMirrorChanged( prev: PlayerViewModel.UiState, diag: ClientDiagnostics, ): Boolean</ID>
     <ID>CyclomaticComplexMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm( buffer: ByteBuffer, length: Int, timeoutMs: Int, ): Int</ID>
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
+    <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun ensureAuxiliaryStarted()</ID>
     <ID>FunctionNaming:MainActivity.kt$@Composable fun SyncInfoRow( label: String, value: String, color: androidx.compose.ui.graphics.Color = MaterialTheme.colors.onSurface, )</ID>
     <ID>FunctionNaming:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.1f", uiState.smoothedLatencyMs)</ID>
@@ -23,20 +25,27 @@
     <ID>ImplicitDefaultLocale:PcmAudioOutput.kt$PcmAudioOutput$String.format("%.3f", clampedSpeed)</ID>
     <ID>InvalidPackageDeclaration:FrameworkResumeCrashTest.kt$package com.sendspinlite.ui</ID>
     <ID>LargeClass:PcmAudioOutput.kt$PcmAudioOutput</ID>
+    <ID>LargeClass:SendspinNativeClient.kt$SendspinNativeClient : SendspinNativeCallbacks</ID>
     <ID>LargeClass:SendspinService.kt$SendspinService : Service</ID>
     <ID>LongMethod:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>LongMethod:MainActivity.kt$private fun exportAndShareLogs( context: android.content.Context, uiState: PlayerViewModel.UiState, onLogsReady: (Uri?) -&gt; Unit, )</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun start( sampleRate: Int, channels: Int, bitDepth: Int, )</ID>
     <ID>LongMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>LongMethod:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded( context: Context, output: PcmAudioOutput, tag: String, )</ID>
+    <ID>LongMethod:SendspinNativeClient.kt$SendspinNativeClient$private fun publishDiagnostics(snapshot: DiagnosticsSnapshot)</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
-    <ID>LongMethod:SendspinService.kt$SendspinService$override fun onCreate()</ID>
     <ID>LongMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
+    <ID>LongMethod:SendspinService.kt$SendspinService$private fun mirrorFullUiState( previous: PlayerViewModel.UiState, diag: ClientDiagnostics, ): PlayerViewModel.UiState</ID>
+    <ID>LongParameterList:DiagnosticsDelta.kt$DiagnosticsDelta$( current: ClientDiagnostics, status: String, connected: Boolean, timeSynced: Boolean, outputStarted: Boolean, outputQueueMs: Long, queuedChunks: Int, latencyMs: Double, connectionType: String, networkQuality: String, stability: String, staticDelayMs: Long, trackProgress: Long?, trackDuration: Long?, )</ID>
+    <ID>LongParameterList:PlaybackHealthRules.kt$PlaybackHealthRules$( playbackState: String, audioOutputStarted: Boolean, connected: Boolean, msSinceLastWrite: Long, outputQueueMs: Long, linkDegraded: Boolean, )</ID>
     <ID>LongParameterList:SendspinNative.kt$SendspinNative$( callbacks: SendspinNativeCallbacks, clientId: String, name: String, productName: String, manufacturer: String, softwareVersion: String, fixedDelayUs: Int, audioBufferCapacity: Long, initialStaticDelayMs: Int, )</ID>
     <ID>LongParameterList:SendspinNative.kt$SendspinNativeCallbacks$( title: String?, artist: String?, album: String?, albumArtist: String?, artworkUrl: String?, year: Int, track: Int, progressMs: Int, durationMs: Int, )</ID>
     <ID>LoopWithTooManyJumpStatements:PcmAudioOutput.kt$PcmAudioOutput$while</ID>
     <ID>MagicNumber:AudioIssueReporter.kt$AudioIssueReporter$1000.0</ID>
     <ID>MagicNumber:AudioIssueReporter.kt$AudioIssueReporter$50</ID>
+    <ID>MagicNumber:CachedDiagnosticLabels.kt$CachedDiagnosticLabels$1_000L</ID>
+    <ID>MagicNumber:CachedDiagnosticLabels.kt$CachedDiagnosticLabels$3</ID>
+    <ID>MagicNumber:CachedDiagnosticLabels.kt$CachedDiagnosticLabels$5_000L</ID>
     <ID>MagicNumber:CrashReportingManager.kt$CrashReportingManager$50</ID>
     <ID>MagicNumber:MainActivity.kt$0.01</ID>
     <ID>MagicNumber:MainActivity.kt$0.995f</ID>
@@ -62,7 +71,6 @@
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.0001f</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.05f</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.10</ID>
-    <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.25</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.5f</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0.999f</ID>
     <ID>MagicNumber:PcmAudioOutput.kt$PcmAudioOutput$0xFFFF_FFFFL</ID>
@@ -98,7 +106,6 @@
     <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$4000</ID>
     <ID>MagicNumber:PcmFormatSupport.kt$PcmFormatSupport$8</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$100</ID>
-    <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$1_500_000_000L</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$5000</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel$5000L</ID>
     <ID>MagicNumber:PlayerViewModel.kt$PlayerViewModel.&lt;no name provided&gt;$100</ID>
@@ -116,14 +123,14 @@
     <ID>MagicNumber:SendspinAudioWarmup.kt$SendspinAudioWarmup$8</ID>
     <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$100</ID>
     <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$10000L</ID>
-    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$1_000L</ID>
+    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$100L</ID>
     <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$5000L</ID>
-    <ID>MagicNumber:SendspinNativeClient.kt$SendspinNativeClient$5_000L</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$100</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$1000</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$1000L</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$2_000_000_000L</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$30_000L</ID>
+    <ID>MagicNumber:SendspinService.kt$SendspinService$400</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$5</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$5000</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService$5000L</ID>
@@ -133,6 +140,9 @@
     <ID>MagicNumber:SendspinService.kt$SendspinService.&lt;no name provided&gt;$1000</ID>
     <ID>MagicNumber:SendspinSystemUtils.kt$SendspinSystemUtils$100</ID>
     <ID>MagicNumber:SendspinSystemUtils.kt$SendspinSystemUtils$2_000_000_000L</ID>
+    <ID>MaxLineLength:AppMemoryPolicy.kt$AppMemoryPolicy$fun diagnosticsIntervalMs(lean: Boolean): Long</ID>
+    <ID>MaxLineLength:AppMemoryPolicy.kt$AppMemoryPolicy$fun eventBufferCapacity(lean: Boolean): Int</ID>
+    <ID>MaxLineLength:AppMemoryPolicy.kt$AppMemoryPolicy$fun healthCheckIntervalMs(lean: Boolean): Long</ID>
     <ID>MaxLineLength:CrashReportingManager.kt$CrashReportingManager$private fun prefs(context: Context): SharedPreferences</ID>
     <ID>MaxLineLength:FrameworkResumeCrashTest.kt$FrameworkResumeCrashTest$StackTraceElement("android.app.IActivityManager\$Stub\$Proxy", "isTopOfTask", "IActivityManager.java", 8367)</ID>
     <ID>MaxLineLength:MainActivity.kt$"Sendspin Lite crashed during the last session. The crash was automatically reported to help improve the app."</ID>
@@ -150,10 +160,11 @@
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$SendspinService.startService(getApplication(), wsUrl, deviceId, "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$deviceId = Settings.Secure.getString(getApplication&lt;Application&gt;().contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"</ID>
-    <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$val activityManager = getApplication&lt;Application&gt;().getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager</ID>
+    <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$private fun checkIsLowMemoryDevice(): Boolean</ID>
     <ID>MaxLineLength:SendspinAudioWarmup.kt$SendspinAudioWarmup$"Audio warmup baseline saved: version=$currentVersionCode format=$selectedFormatText latencyMs=${baselineLatencyUs / 1000.0}"</ID>
+    <ID>MaxLineLength:SendspinService.kt$SendspinService$"Unexpected connection drop detected. totalDrops=${previousState.connectionDrops + 1}, status=${newState.status}"</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$Log.i(tag, "Applied server volume command: ${event.volume}% (systemVolume=$systemVolume)")</ID>
-    <ID>MaxLineLength:SendspinService.kt$SendspinService$Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")</ID>
+    <ID>MaxLineLength:SendspinService.kt$SendspinService$if</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService$wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SendspinService::WifiLock")</ID>
     <ID>MaxLineLength:SendspinService.kt$SendspinService.&lt;no name provided&gt;$connect(freshState.wsUrl, freshState.clientId, freshState.clientName, fromBoot = false)</ID>
@@ -176,16 +187,20 @@
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun getMinBufferSizeIfSupported( sampleRate: Int, channels: Int, bitDepth: Int, ): Int</ID>
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$fun isPlaybackFormatSupported( sampleRate: Int, channels: Int, bitDepth: Int, ): Boolean</ID>
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$private fun isStructurallyValid(format: AudioFormat): Boolean</ID>
+    <ID>ReturnCount:PlaybackHealthRules.kt$PlaybackHealthRules$fun shouldReportStarvation( playbackState: String, audioOutputStarted: Boolean, connected: Boolean, msSinceLastWrite: Long, outputQueueMs: Long, linkDegraded: Boolean, ): Boolean</ID>
     <ID>ReturnCount:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded( context: Context, output: PcmAudioOutput, tag: String, )</ID>
     <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$override fun isNetworkReady(): Boolean</ID>
-    <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$private fun deriveClockStability( timeSynced: Boolean, clockUpdateCount: Int, ): String</ID>
+    <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$private fun ensureNativeHandleLocked(): Boolean</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$override fun onStartCommand( intent: Intent?, flags: Int, startId: Int, ): Int</ID>
+    <ID>ReturnCount:SendspinService.kt$SendspinService$private fun applyDiagnosticsFromClient(diag: ClientDiagnostics)</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$private fun isNetworkAvailable(): Boolean</ID>
+    <ID>ReturnCount:SendspinService.kt$SendspinService$private fun reconnectFromSavedCredentialsIfIdle()</ID>
     <ID>ReturnCount:SendspinSystemUtils.kt$SendspinSystemUtils$fun isBatteryOptimizationIgnored(context: Context): Boolean</ID>
     <ID>SpreadOperator:SendspinService.kt$SendspinService$(*actionIndices.toIntArray())</ID>
     <ID>SwallowedException:PcmAudioOutput.kt$PcmAudioOutput$e: UnsupportedOperationException</ID>
     <ID>SwallowedException:PlayerViewModel.kt$PlayerViewModel$e: Exception</ID>
     <ID>SwallowedException:PortChecker.kt$PortChecker$e: SocketTimeoutException</ID>
+    <ID>SwallowedException:SendspinSystemUtils.kt$SendspinSystemUtils$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AudioIssueReporter.kt$AudioIssueReporter$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CrashReportingManager.kt$CrashReportingManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:MainActivity.kt$e: Exception</ID>
@@ -204,6 +219,7 @@
     <ID>TooManyFunctions:SendspinNative.kt$SendspinNativeCallbacks</ID>
     <ID>TooManyFunctions:SendspinNativeClient.kt$SendspinNativeClient : SendspinNativeCallbacks</ID>
     <ID>TooManyFunctions:SendspinService.kt$SendspinService : Service</ID>
+    <ID>UnusedPrivateMember:SendspinService.kt$SendspinService$private fun checkIsLowMemoryDevice(): Boolean</ID>
     <ID>UnusedPrivateProperty:ServiceDiscovery.kt$ServiceDiscovery$private var resolveListener: NsdManager.ResolveListener? = null</ID>
     <ID>WildcardImport:MainActivity.kt$import androidx.compose.foundation.layout.*</ID>
     <ID>WildcardImport:MainActivity.kt$import androidx.compose.material.*</ID>

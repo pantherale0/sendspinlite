@@ -5,9 +5,12 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
+import com.sendspinlite.diagnostics.CachedDiagnosticLabels
+import com.sendspinlite.diagnostics.DiagnosticsDelta
 import com.sendspinlite.playback.PcmAudioOutput
 import com.sendspinlite.playback.PlaybackDiagnostics
 import com.sendspinlite.playback.PlaybackHealthRules
+import com.sendspinlite.system.AppMemoryPolicy
 import com.sendspinlite.system.SendspinSystemUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +50,12 @@ class SendspinNativeClient(
     private val _diagnostics = MutableStateFlow(ClientDiagnostics())
     val diagnostics: StateFlow<ClientDiagnostics> = _diagnostics.asStateFlow()
 
-    private val _events = MutableSharedFlow<ClientEvent>(extraBufferCapacity = 64)
+    private val leanDevice = AppMemoryPolicy.isLeanDevice(context)
+
+    private val _events =
+        MutableSharedFlow<ClientEvent>(
+            extraBufferCapacity = AppMemoryPolicy.eventBufferCapacity(leanDevice),
+        )
     val events: SharedFlow<ClientEvent> = _events.asSharedFlow()
 
     /** Wired by the service to drive the WiFi high-performance lock. */
@@ -58,8 +66,14 @@ class SendspinNativeClient(
     var onReleaseHighPerformance: () -> Unit = {}
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val output = PcmAudioOutput()
-    private val isLowMemoryDevice = SendspinSystemUtils.checkIsLowMemoryDevice(context, tag)
+    private val output =
+        PcmAudioOutput().also {
+            it.setLeanMode(leanDevice)
+        }
+
+    private val diagnosticsIntervalMs = AppMemoryPolicy.diagnosticsIntervalMs(leanDevice)
+    private val healthCheckIntervalMs = AppMemoryPolicy.healthCheckIntervalMs(leanDevice)
+    private val cachedLabels = CachedDiagnosticLabels(context, tag)
 
     // Native handle ownership. Access is guarded by handleLock; 0 means not created / destroyed.
     private val handleLock = Any()
@@ -102,28 +116,40 @@ class SendspinNativeClient(
     private var healthJob: Job? = null
 
     init {
-        synchronized(handleLock) {
-            handle =
-                SendspinNative.nativeCreate(
-                    callbacks = this,
-                    clientId = clientId,
-                    name = clientName,
-                    productName = PRODUCT_NAME,
-                    manufacturer = Build.MANUFACTURER ?: "Android",
-                    softwareVersion = SOFTWARE_VERSION,
-                    fixedDelayUs = BASELINE_FIXED_DELAY_US,
-                    audioBufferCapacity = AUDIO_BUFFER_CAPACITY,
-                    initialStaticDelayMs = 0,
-                )
-        }
         updateDiagnostics {
             it.copy(
                 hasMetadata = true,
                 activeRoles = ACTIVE_ROLES,
-                isLowMemoryDevice = isLowMemoryDevice,
+                isLowMemoryDevice = leanDevice,
                 connectionType = SendspinSystemUtils.getConnectionType(context, tag),
             )
         }
+    }
+
+    private fun ensureNativeHandleLocked(): Boolean {
+        if (handle != 0L) return true
+        handle =
+            SendspinNative.nativeCreate(
+                callbacks = this,
+                clientId = clientId,
+                name = clientName,
+                productName = PRODUCT_NAME,
+                manufacturer = Build.MANUFACTURER ?: "Android",
+                softwareVersion = SOFTWARE_VERSION,
+                fixedDelayUs = BASELINE_FIXED_DELAY_US,
+                audioBufferCapacity = AppMemoryPolicy.nativeRingBufferBytes(leanDevice),
+                initialStaticDelayMs = 0,
+            )
+        if (handle == 0L) {
+            Log.e(tag, "nativeCreate failed")
+            return false
+        }
+        Log.i(
+            tag,
+            "Native client created (lean=$leanDevice, ringBuffer=" +
+                "${AppMemoryPolicy.nativeRingBufferBytes(leanDevice)} bytes)",
+        )
+        return true
     }
 
     suspend fun connect() {
@@ -133,13 +159,11 @@ class SendspinNativeClient(
         val connected =
             withContext(Dispatchers.IO) {
                 synchronized(handleLock) {
-                    val h = handle
-                    if (h == 0L) {
-                        Log.w(tag, "connect() called after destroy")
+                    if (!ensureNativeHandleLocked()) {
                         return@withContext false
                     }
-                    SendspinNative.nativeStart(h)
-                    SendspinNative.nativeConnect(h, wsUrl)
+                    SendspinNative.nativeStart(handle)
+                    SendspinNative.nativeConnect(handle, wsUrl)
                     true
                 }
             }
@@ -245,13 +269,35 @@ class SendspinNativeClient(
         Log.i(tag, "setPlayoutOffsetAdjustmentMs($ms) ignored: native sync owns playout offset")
     }
 
-    // The native sync task uses a fixed ring buffer and silence-insert/drop scheduling rather than
-    // a Kotlin jitter buffer, so there is nothing to trim on memory pressure.
-    fun trimAudioBufferCritical() = Log.i(tag, "trimAudioBufferCritical: no-op (native ring buffer)")
+    // Release Kotlin-visible footprint on memory pressure. Native ring buffer size is fixed at
+    // create time; lean devices use a smaller capacity via [AppMemoryPolicy].
+    fun trimAudioBufferCritical() {
+        Log.w(tag, "trimAudioBufferCritical: reducing playback footprint")
+        val queueMs = if (output.isStarted()) output.getOutputQueueMs() else 0L
+        if (output.isStarted() && queueMs < 100L) {
+            output.pause()
+        }
+        trimDiagnosticsFootprint(aggressive = true)
+    }
 
-    fun trimAudioBufferModerate() = Log.i(tag, "trimAudioBufferModerate: no-op (native ring buffer)")
+    fun trimAudioBufferModerate() {
+        Log.i(tag, "trimAudioBufferModerate: clearing non-essential diagnostics")
+        trimDiagnosticsFootprint(aggressive = false)
+    }
 
-    fun trimAudioBufferLow() = Log.i(tag, "trimAudioBufferLow: no-op (native ring buffer)")
+    fun trimAudioBufferLow() {
+        trimDiagnosticsFootprint(aggressive = false)
+    }
+
+    private fun trimDiagnosticsFootprint(aggressive: Boolean) {
+        updateDiagnostics {
+            it.copy(
+                artworkBitmap = null,
+                artworkUrl = null,
+                lastRecoveryEvent = if (aggressive) "" else it.lastRecoveryEvent,
+            )
+        }
+    }
 
     /** Called when the OS signals the active network link is degrading (e.g. Wi-Fi roam). */
     fun notifyLinkDegrading(maxMsToLive: Int) {
@@ -332,7 +378,7 @@ class SendspinNativeClient(
                     if (snapshot != null) {
                         publishDiagnostics(snapshot)
                     }
-                    delay(DIAGNOSTICS_INTERVAL_MS)
+                    delay(diagnosticsIntervalMs)
                 }
             }
     }
@@ -343,7 +389,7 @@ class SendspinNativeClient(
             scope.launch {
                 while (isActive && started.get()) {
                     checkPlaybackHealth()
-                    delay(HEALTH_CHECK_INTERVAL_MS)
+                    delay(healthCheckIntervalMs)
                 }
             }
     }
@@ -431,6 +477,42 @@ class SendspinNativeClient(
             } else {
                 0
             }
+
+        val current = _diagnostics.value
+        val connectionType = cachedLabels.connectionType()
+        val networkQuality = cachedLabels.networkQuality(current.offsetUncertaintyUs)
+        val stability =
+            cachedLabels.clockStability(
+                timeSynced = snapshot.timeSynced,
+                clockUpdateCount = current.clockUpdateCount,
+                firstTimeSyncedAtMs = firstTimeSyncedAtMs,
+            )
+        val trackProgress =
+            if (snapshot.durationMs > 0) snapshot.progressMs.toLong() else current.trackProgress
+        val trackDuration =
+            if (snapshot.durationMs > 0) snapshot.durationMs.toLong() else current.trackDuration
+
+        if (
+            !DiagnosticsDelta.hotPublishChanged(
+                current = current,
+                status = status,
+                connected = snapshot.connected,
+                timeSynced = snapshot.timeSynced,
+                outputStarted = outputStarted,
+                outputQueueMs = outputQueueMs,
+                queuedChunks = queuedChunks,
+                latencyMs = latencyMs,
+                connectionType = connectionType,
+                networkQuality = networkQuality,
+                stability = stability,
+                staticDelayMs = snapshot.staticDelayMs,
+                trackProgress = trackProgress,
+                trackDuration = trackDuration,
+            )
+        ) {
+            return
+        }
+
         updateDiagnostics {
             it.copy(
                 status = status,
@@ -443,13 +525,11 @@ class SendspinNativeClient(
                 bufferAheadMs = outputQueueMs,
                 effectiveBufferAheadMs = outputQueueMs,
                 staticDelayMs = snapshot.staticDelayMs,
-                connectionType = SendspinSystemUtils.getConnectionType(context, tag),
-                networkQuality = deriveNetworkQuality(it.offsetUncertaintyUs),
-                stability = deriveClockStability(snapshot.timeSynced, it.clockUpdateCount),
-                trackProgress =
-                    if (snapshot.durationMs > 0) snapshot.progressMs.toLong() else it.trackProgress,
-                trackDuration =
-                    if (snapshot.durationMs > 0) snapshot.durationMs.toLong() else it.trackDuration,
+                connectionType = connectionType,
+                networkQuality = networkQuality,
+                stability = stability,
+                trackProgress = trackProgress,
+                trackDuration = trackDuration,
             )
         }
     }
@@ -463,7 +543,10 @@ class SendspinNativeClient(
     )
 
     private fun updateDiagnostics(block: (ClientDiagnostics) -> ClientDiagnostics) {
-        _diagnostics.update(block)
+        _diagnostics.update { current ->
+            val next = block(current)
+            if (next == current) current else next
+        }
     }
 
     // ========================================================================
@@ -597,11 +680,15 @@ class SendspinNativeClient(
             val count = it.clockUpdateCount + 1
             it.copy(
                 offsetUncertaintyUs = uncertaintyUs,
-                // get_error() is offset std-dev (µs); scale for a rough RTT display estimate.
                 rttUs = uncertaintyUs * 2,
                 clockUpdateCount = count,
-                networkQuality = deriveNetworkQuality(uncertaintyUs),
-                stability = deriveClockStability(true, count),
+                networkQuality = cachedLabels.networkQuality(uncertaintyUs),
+                stability =
+                    cachedLabels.clockStability(
+                        timeSynced = true,
+                        clockUpdateCount = count,
+                        firstTimeSyncedAtMs = firstTimeSyncedAtMs,
+                    ),
             )
         }
     }
@@ -632,13 +719,25 @@ class SendspinNativeClient(
         if (!connected) {
             firstTimeSyncedAtMs = 0L
         }
+        cachedLabels.invalidateConnectionType()
         updateDiagnostics {
             it.copy(
                 status = status,
                 connected = connected,
                 activeRoles = if (connected) ACTIVE_ROLES else "",
-                networkQuality = if (connected) deriveNetworkQuality(it.offsetUncertaintyUs) else "UNKNOWN",
-                stability = "UNSTABLE",
+                connectionType = if (connected) cachedLabels.connectionType() else it.connectionType,
+                networkQuality =
+                    if (connected) cachedLabels.networkQuality(it.offsetUncertaintyUs) else "UNKNOWN",
+                stability =
+                    if (connected) {
+                        cachedLabels.clockStability(
+                            timeSynced = it.clockReadyForPlayback,
+                            clockUpdateCount = it.clockUpdateCount,
+                            firstTimeSyncedAtMs = firstTimeSyncedAtMs,
+                        )
+                    } else {
+                        "UNSTABLE"
+                    },
             )
         }
         if (!connected) {
@@ -669,38 +768,12 @@ class SendspinNativeClient(
 
         // Platform pipeline delay is tracked via notify_audio_played feedback, not fixed_delay.
         private const val BASELINE_FIXED_DELAY_US = 0
-        private const val AUDIO_BUFFER_CAPACITY = 2_000_000L
         private const val FEEDBACK_INTERVAL_MS = 5L
-        private const val DIAGNOSTICS_INTERVAL_MS = 250L
-        private const val HEALTH_CHECK_INTERVAL_MS = 200L
 
         /** Nominal chunk duration used for output-queue → chunk count UI mapping. */
         private const val CHUNK_MS = 20L
 
         /** Roles compiled into the native client (player + metadata). */
         private const val ACTIVE_ROLES = "player, metadata"
-    }
-
-    private fun deriveNetworkQuality(offsetUncertaintyUs: Long): String =
-        when {
-            offsetUncertaintyUs <= 0L -> "UNKNOWN"
-            offsetUncertaintyUs < 1_000L -> "GOOD"
-            offsetUncertaintyUs < 5_000L -> "FAIR"
-            else -> "POOR"
-        }
-
-    private fun deriveClockStability(
-        timeSynced: Boolean,
-        clockUpdateCount: Int,
-    ): String {
-        if (!timeSynced || clockUpdateCount == 0) return "UNSTABLE"
-        val anchorMs = firstTimeSyncedAtMs
-        if (anchorMs == 0L) return "UNSTABLE"
-        val elapsedMs = System.currentTimeMillis() - anchorMs
-        return when {
-            elapsedMs >= 5_000L -> "STABLE"
-            elapsedMs >= 1_000L -> "CONVERGING"
-            else -> "UNSTABLE"
-        }
     }
 }

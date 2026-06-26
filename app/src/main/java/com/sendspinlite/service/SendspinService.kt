@@ -25,8 +25,11 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
+import com.sendspinlite.client.ClientDiagnostics
 import com.sendspinlite.client.ClientEvent
 import com.sendspinlite.client.SendspinNativeClient
+import com.sendspinlite.diagnostics.DiagnosticsDelta
+import com.sendspinlite.system.AppMemoryPolicy
 import com.sendspinlite.ui.MainActivity
 import com.sendspinlite.ui.PlayerViewModel
 import kotlinx.coroutines.*
@@ -38,7 +41,14 @@ class SendspinService : Service() {
     private val tag = "SendspinService"
     private val binder = LocalBinder()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private var auxiliaryStarted = false
+    private var uiStateCollectorsJob: Job? = null
+
+    /** When false, diagnostics from the client only update notification/session essentials (kiosk path). */
+    @Volatile
+    var uiMirrorEnabled: Boolean = false
 
     private var client: SendspinNativeClient? = null
     private var mediaSession: MediaSessionCompat? = null
@@ -166,8 +176,17 @@ class SendspinService : Service() {
         }
     }
 
+    fun setUiDiagnosticsMirrorEnabled(enabled: Boolean) {
+        uiMirrorEnabled = enabled
+        Log.i(tag, "UI diagnostics mirror ${if (enabled) "enabled" else "disabled"}")
+    }
+
     inner class LocalBinder : Binder() {
         fun getService(): SendspinService = this@SendspinService
+
+        fun setUiMirrorEnabled(enabled: Boolean) {
+            this@SendspinService.setUiDiagnosticsMirrorEnabled(enabled)
+        }
     }
 
     override fun onCreate() {
@@ -176,7 +195,7 @@ class SendspinService : Service() {
 
         // Initialize low-memory detection now that context is ready
         isTV = checkIsTV()
-        isLowMemoryDevice = checkIsLowMemoryDevice()
+        isLowMemoryDevice = AppMemoryPolicy.isLeanDevice(this)
 
         // Initialize UI state with current system volume and mute state
         val initialVolume = getSystemMediaVolume()
@@ -212,73 +231,71 @@ class SendspinService : Service() {
                 setReferenceCounted(true)
             }
 
-        // Register network connectivity receiver
-        registerNetworkReceiver()
-        registerNetworkCallback()
-
-        // Register volume change receiver for background volume monitoring
-        registerVolumeChangeReceiver()
-
-        // Register memory trim callbacks to respond to system memory pressure
+        // Memory trim must be registered early so LMK pressure is handled during cold start.
         memoryTrimCallback = createMemoryTrimCallback()
         registerComponentCallbacks(memoryTrimCallback)
+    }
 
-        // Monitor connection state and auto-reconnect on failures, and manage wake lock
-        scope.launch {
-            _uiState.collect { state ->
-                // Manage wake lock dynamically based on playback status
-                val shouldHoldWakeLock = state.connected && state.playbackState == "playing"
-                wakeLock?.let { lock ->
-                    if (shouldHoldWakeLock) {
-                        if (!lock.isHeld) {
-                            lock.acquire()
-                            Log.i(tag, "WakeLock acquired dynamically (playing)")
-                        }
-                    } else {
-                        if (lock.isHeld) {
-                            lock.release()
-                            Log.i(tag, "WakeLock released dynamically (not playing)")
-                        }
-                    }
-                }
+    /**
+     * Network receivers, MediaSession, and state collectors are deferred until the first
+     * [connect] to keep sticky-restart / LMK recovery paths as light as possible.
+     */
+    private fun ensureAuxiliaryStarted() {
+        if (auxiliaryStarted) return
+        auxiliaryStarted = true
+        Log.i(tag, "Starting deferred service components")
 
-                // Keep Wi-Fi in high-performance mode for the whole playback session so roams are
-                // less likely to starve the WebSocket while AudioTrack drains.
-                val shouldHoldWifiLock = state.connected && state.playbackState == "playing"
-                wifiLock?.let { lock ->
-                    if (shouldHoldWifiLock) {
-                        if (!lock.isHeld) {
-                            lock.acquire()
-                            Log.i(tag, "WifiLock acquired dynamically (playing)")
-                        }
-                    } else {
-                        if (lock.isHeld) {
-                            lock.release()
-                            Log.i(tag, "WifiLock released dynamically (not playing)")
-                        }
-                    }
-                }
+        registerNetworkReceiver()
+        registerNetworkCallback()
+        registerVolumeChangeReceiver()
 
-                // If connection failed and we're not already retrying, start auto-reconnect
-                if (state.status.startsWith("failure:") && reconnectJob == null) {
-                    Log.i(tag, "Connection failed, starting auto-reconnect")
-                    startAutoReconnect(state.wsUrl, state.clientId, state.clientName)
-                }
-            }
-        }
-
-        // Initialize MediaSessionCompat for Android 14+ foreground service compliance
         mediaSession =
             MediaSessionCompat(this, "SendspinMediaSession").apply {
                 isActive = true
             }
 
-        // Keep MediaSession state in sync with UI/playback state
-        scope.launch {
-            _uiState.collect {
-                updateMediaSessionState()
+        uiStateCollectorsJob?.cancel()
+        uiStateCollectorsJob =
+            scope.launch {
+                _uiState.collect { state ->
+                    val shouldHoldWakeLock = state.connected && state.playbackState == "playing"
+                    wakeLock?.let { lock ->
+                        if (shouldHoldWakeLock) {
+                            if (!lock.isHeld) {
+                                lock.acquire()
+                                Log.i(tag, "WakeLock acquired dynamically (playing)")
+                            }
+                        } else {
+                            if (lock.isHeld) {
+                                lock.release()
+                                Log.i(tag, "WakeLock released dynamically (not playing)")
+                            }
+                        }
+                    }
+
+                    val shouldHoldWifiLock = state.connected && state.playbackState == "playing"
+                    wifiLock?.let { lock ->
+                        if (shouldHoldWifiLock) {
+                            if (!lock.isHeld) {
+                                lock.acquire()
+                                Log.i(tag, "WifiLock acquired dynamically (playing)")
+                            }
+                        } else {
+                            if (lock.isHeld) {
+                                lock.release()
+                                Log.i(tag, "WifiLock released dynamically (not playing)")
+                            }
+                        }
+                    }
+
+                    if (state.status.startsWith("failure:") && reconnectJob == null) {
+                        Log.i(tag, "Connection failed, starting auto-reconnect")
+                        startAutoReconnect(state.wsUrl, state.clientId, state.clientName)
+                    }
+
+                    updateMediaSessionState()
+                }
             }
-        }
     }
 
     override fun onStartCommand(
@@ -300,6 +317,7 @@ class SendspinService : Service() {
         startForegroundWithRetry(fromBoot = startedFromBoot || fromBoot)
 
         if (intent == null) {
+            reconnectFromSavedCredentialsIfIdle()
             return START_STICKY
         }
 
@@ -352,12 +370,14 @@ class SendspinService : Service() {
         memoryTrimCallback?.let { unregisterComponentCallbacks(it) }
         memoryTrimCallback = null
 
-        // Unregister network connectivity receiver
-        unregisterNetworkReceiver()
-        unregisterNetworkCallback()
-
-        // Unregister volume change receiver
-        unregisterVolumeChangeReceiver()
+        // Unregister deferred components only if they were started
+        if (auxiliaryStarted) {
+            unregisterNetworkReceiver()
+            unregisterNetworkCallback()
+            unregisterVolumeChangeReceiver()
+            uiStateCollectorsJob?.cancel()
+            uiStateCollectorsJob = null
+        }
 
         // Release wake lock
         wakeLock?.let {
@@ -563,6 +583,8 @@ class SendspinService : Service() {
         clientName: String,
         fromBoot: Boolean = false,
     ) {
+        ensureAuxiliaryStarted()
+
         // Don't create a new connection if we're already connected or connecting to the same server
         if (client != null &&
             _uiState.value.wsUrl == wsUrl &&
@@ -630,93 +652,7 @@ class SendspinService : Service() {
                 activeClient.diagnostics
                     .takeWhile { client === activeClient }
                     .collect { diag ->
-                        val previousState = _uiState.value
-                        var newState =
-                            previousState.copy(
-                                status = diag.status,
-                                connected = diag.connected,
-                                activeRoles = diag.activeRoles,
-                                playbackState = diag.playbackState,
-                                groupName = diag.groupName,
-                                streamDesc = diag.streamDesc,
-                                offsetUncertaintyUs = diag.offsetUncertaintyUs,
-                                driftPpm = diag.driftPpm,
-                                driftUncertaintyPpm = diag.driftUncertaintyPpm,
-                                driftSnr = diag.driftSnr,
-                                rttUs = diag.rttUs,
-                                networkQuality = diag.networkQuality,
-                                stability = diag.stability,
-                                connectionType = diag.connectionType,
-                                queuedChunks = diag.queuedChunks,
-                                bufferAheadMs = diag.bufferAheadMs,
-                                lateDrops = diag.lateDrops,
-                                audibleSyncCount = diag.audibleSyncCount,
-                                kalmanErrorCount = diag.kalmanErrorCount,
-                                groupVolume = diag.groupVolume,
-                                groupMuted = diag.groupMuted,
-                                supportedCommands = diag.supportedCommands,
-                                playbackSpeedMultiplier = diag.playbackSpeedMultiplier,
-                                smoothedLatencyMs = diag.smoothedLatencyMs,
-                                audioOutputStarted = diag.audioOutputStarted,
-                                playbackRecoveryStatus = diag.playbackRecoveryStatus,
-                                lastRecoveryEvent = diag.lastRecoveryEvent,
-                                clockReadyForPlayback = diag.clockReadyForPlayback,
-                                forceResyncActive = diag.forceResyncActive,
-                                inDiscontinuityRecovery = diag.inDiscontinuityRecovery,
-                                lateRestartLoops = diag.lateRestartLoops,
-                                effectiveBufferAheadMs = diag.effectiveBufferAheadMs,
-                                estimatedOffsetMs = diag.estimatedOffsetMs,
-                                playoutOffsetMs = diag.playoutOffsetMs,
-                                networkJitterMs = diag.networkJitterMs,
-                                clockUpdateCount = diag.clockUpdateCount,
-                                serverLatenessMs = diag.serverLatenessMs,
-                                lastAudioCutAgeMs = diag.lastAudioCutAgeMs,
-                                metadataTimestamp = diag.metadataTimestamp,
-                                trackTitle = diag.trackTitle,
-                                trackArtist = diag.trackArtist,
-                                albumTitle = diag.albumTitle,
-                                albumArtist = diag.albumArtist,
-                                trackYear = diag.trackYear,
-                                trackNumber = diag.trackNumber,
-                                artworkUrl = diag.artworkUrl,
-                                artworkBitmap = diag.artworkBitmap,
-                                trackProgress = diag.trackProgress,
-                                trackDuration = diag.trackDuration,
-                                playbackSpeed = diag.playbackSpeed,
-                                repeatMode = diag.repeatMode,
-                                shuffleEnabled = diag.shuffleEnabled,
-                                playerVolume = diag.playerVolume,
-                                playerVolumeFromServer = diag.playerVolumeFromServer,
-                                playerMuted = diag.playerMuted,
-                                playerMutedFromServer = diag.playerMutedFromServer,
-                                staticDelayMs = diag.staticDelayMs,
-                                staticDelayMsFromServer = diag.staticDelayMsFromServer,
-                                hasMetadata = diag.hasMetadata,
-                                hasController = diag.hasController,
-                                isLowMemoryDevice = diag.isLowMemoryDevice,
-                            )
-
-                        // Mark that we had at least one successful websocket connection.
-                        if (newState.connected && newState.status == "ws_open") {
-                            hasEstablishedConnection = true
-                            dropCountedForCurrentOutage = false
-                        }
-
-                        // Count only unexpected connection losses, and only once per outage.
-                        val unexpectedDisconnect =
-                            hasEstablishedConnection &&
-                                previousState.connected &&
-                                !newState.connected &&
-                                (newState.status.startsWith("failure:") || newState.status.startsWith("closed:"))
-
-                        if (unexpectedDisconnect && !dropCountedForCurrentOutage) {
-                            dropCountedForCurrentOutage = true
-                            newState = newState.copy(connectionDrops = previousState.connectionDrops + 1)
-                            Log.w(tag, "Unexpected connection drop detected. totalDrops=${newState.connectionDrops}, status=${newState.status}")
-                        }
-
-                        _uiState.value = newState
-                        updateNotification()
+                        applyDiagnosticsFromClient(diag)
                     }
             }
 
@@ -1100,6 +1036,21 @@ class SendspinService : Service() {
         }
     }
 
+    private fun reconnectFromSavedCredentialsIfIdle() {
+        if (client != null) return
+
+        val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
+        val wsUrl = prefs.getString("ws_url", null)?.takeIf { it.isNotBlank() } ?: return
+        val clientId = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() } ?: return
+        val clientName = "${Build.MANUFACTURER} ${Build.MODEL}"
+
+        Log.i(tag, "Sticky service restart — reconnecting from saved credentials")
+        scope.launch {
+            ensureAuxiliaryStarted()
+            connect(wsUrl, clientId, clientName, fromBoot = true)
+        }
+    }
+
     private fun isNetworkAvailable(): Boolean {
         return try {
             val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -1210,6 +1161,140 @@ class SendspinService : Service() {
             }
         }
         volumeChangeReceiver = null
+    }
+
+    private fun applyDiagnosticsFromClient(diag: ClientDiagnostics) {
+        val previousState = _uiState.value
+        val newState =
+            if (uiMirrorEnabled) {
+                if (!DiagnosticsDelta.fullMirrorChanged(previousState, diag)) {
+                    return
+                }
+                mirrorFullUiState(previousState, diag)
+            } else {
+                if (!DiagnosticsDelta.serviceEssentialsChanged(previousState, diag)) {
+                    return
+                }
+                mirrorServiceEssentials(previousState, diag)
+            }
+
+        val tracked = trackConnectionDrops(previousState, newState)
+        if (tracked == previousState) {
+            return
+        }
+        _uiState.value = tracked
+        updateNotification()
+    }
+
+    private fun mirrorServiceEssentials(
+        previous: PlayerViewModel.UiState,
+        diag: ClientDiagnostics,
+    ): PlayerViewModel.UiState =
+        previous.copy(
+            status = diag.status,
+            connected = diag.connected,
+            playbackState = diag.playbackState,
+            trackTitle = diag.trackTitle,
+            trackArtist = diag.trackArtist,
+            groupName = diag.groupName,
+            hasController = diag.hasController,
+            supportedCommands = diag.supportedCommands,
+            artworkBitmap = diag.artworkBitmap,
+        )
+
+    private fun mirrorFullUiState(
+        previous: PlayerViewModel.UiState,
+        diag: ClientDiagnostics,
+    ): PlayerViewModel.UiState =
+        previous.copy(
+            status = diag.status,
+            connected = diag.connected,
+            activeRoles = diag.activeRoles,
+            playbackState = diag.playbackState,
+            groupName = diag.groupName,
+            streamDesc = diag.streamDesc,
+            offsetUncertaintyUs = diag.offsetUncertaintyUs,
+            driftPpm = diag.driftPpm,
+            driftUncertaintyPpm = diag.driftUncertaintyPpm,
+            driftSnr = diag.driftSnr,
+            rttUs = diag.rttUs,
+            networkQuality = diag.networkQuality,
+            stability = diag.stability,
+            connectionType = diag.connectionType,
+            queuedChunks = diag.queuedChunks,
+            bufferAheadMs = diag.bufferAheadMs,
+            lateDrops = diag.lateDrops,
+            audibleSyncCount = diag.audibleSyncCount,
+            kalmanErrorCount = diag.kalmanErrorCount,
+            groupVolume = diag.groupVolume,
+            groupMuted = diag.groupMuted,
+            supportedCommands = diag.supportedCommands,
+            playbackSpeedMultiplier = diag.playbackSpeedMultiplier,
+            smoothedLatencyMs = diag.smoothedLatencyMs,
+            audioOutputStarted = diag.audioOutputStarted,
+            playbackRecoveryStatus = diag.playbackRecoveryStatus,
+            lastRecoveryEvent = diag.lastRecoveryEvent,
+            clockReadyForPlayback = diag.clockReadyForPlayback,
+            forceResyncActive = diag.forceResyncActive,
+            inDiscontinuityRecovery = diag.inDiscontinuityRecovery,
+            lateRestartLoops = diag.lateRestartLoops,
+            effectiveBufferAheadMs = diag.effectiveBufferAheadMs,
+            estimatedOffsetMs = diag.estimatedOffsetMs,
+            playoutOffsetMs = diag.playoutOffsetMs,
+            networkJitterMs = diag.networkJitterMs,
+            clockUpdateCount = diag.clockUpdateCount,
+            serverLatenessMs = diag.serverLatenessMs,
+            lastAudioCutAgeMs = diag.lastAudioCutAgeMs,
+            metadataTimestamp = diag.metadataTimestamp,
+            trackTitle = diag.trackTitle,
+            trackArtist = diag.trackArtist,
+            albumTitle = diag.albumTitle,
+            albumArtist = diag.albumArtist,
+            trackYear = diag.trackYear,
+            trackNumber = diag.trackNumber,
+            artworkUrl = diag.artworkUrl,
+            artworkBitmap = diag.artworkBitmap,
+            trackProgress = diag.trackProgress,
+            trackDuration = diag.trackDuration,
+            playbackSpeed = diag.playbackSpeed,
+            repeatMode = diag.repeatMode,
+            shuffleEnabled = diag.shuffleEnabled,
+            playerVolume = diag.playerVolume,
+            playerVolumeFromServer = diag.playerVolumeFromServer,
+            playerMuted = diag.playerMuted,
+            playerMutedFromServer = diag.playerMutedFromServer,
+            staticDelayMs = diag.staticDelayMs,
+            staticDelayMsFromServer = diag.staticDelayMsFromServer,
+            hasMetadata = diag.hasMetadata,
+            hasController = diag.hasController,
+            isLowMemoryDevice = diag.isLowMemoryDevice,
+        )
+
+    private fun trackConnectionDrops(
+        previousState: PlayerViewModel.UiState,
+        newState: PlayerViewModel.UiState,
+    ): PlayerViewModel.UiState {
+        if (newState.connected && newState.status == "ws_open") {
+            hasEstablishedConnection = true
+            dropCountedForCurrentOutage = false
+        }
+
+        val unexpectedDisconnect =
+            hasEstablishedConnection &&
+                previousState.connected &&
+                !newState.connected &&
+                (newState.status.startsWith("failure:") || newState.status.startsWith("closed:"))
+
+        if (unexpectedDisconnect && !dropCountedForCurrentOutage) {
+            dropCountedForCurrentOutage = true
+            Log.w(
+                tag,
+                "Unexpected connection drop detected. totalDrops=${previousState.connectionDrops + 1}, status=${newState.status}",
+            )
+            return newState.copy(connectionDrops = previousState.connectionDrops + 1)
+        }
+
+        return newState
     }
 
     private fun createMemoryTrimCallback(): ComponentCallbacks2 {

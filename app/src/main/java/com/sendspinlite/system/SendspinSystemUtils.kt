@@ -12,6 +12,7 @@ import android.util.Log
 import com.sendspinlite.BuildConfig
 
 object SendspinSystemUtils {
+    /** Devices with less than 2 GB total RAM — use lean buffers and reduced UI features. */
     fun checkIsLowMemoryDevice(
         context: Context,
         tag: String,
@@ -21,13 +22,26 @@ object SendspinSystemUtils {
                 context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             val memInfo = ActivityManager.MemoryInfo()
             activityManager?.getMemoryInfo(memInfo)
-            val lowMemory = memInfo?.totalMem ?: 0L < 2_000_000_000L // Less than 2GB total RAM
+            val lowMemory = memInfo?.totalMem ?: 0L < 2_000_000_000L
             if (lowMemory) {
-                Log.i(tag, "Low-memory device detected: disabling metadata and action buttons")
+                Log.i(tag, "Low-memory device detected (${memInfo?.totalMem ?: 0L} bytes RAM)")
             }
             lowMemory
         } catch (e: Exception) {
             Log.w(tag, "Failed to check device memory", e)
+            false
+        }
+    }
+
+    /** True when the system reports active memory pressure (LMK imminent). */
+    fun isSystemUnderMemoryPressure(context: Context): Boolean {
+        return try {
+            val activityManager =
+                context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            val memInfo = ActivityManager.MemoryInfo()
+            activityManager?.getMemoryInfo(memInfo)
+            memInfo?.lowMemory == true
+        } catch (e: Exception) {
             false
         }
     }

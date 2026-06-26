@@ -17,6 +17,7 @@ import com.sendspinlite.network.DiscoveredServer
 import com.sendspinlite.network.ServiceDiscovery
 import com.sendspinlite.playback.PlaybackDiagnostics
 import com.sendspinlite.service.SendspinService
+import com.sendspinlite.system.SendspinSystemUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -130,16 +131,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))
     val ui: StateFlow<UiState> = _ui
 
-    private fun checkIsLowMemoryDevice(): Boolean {
-        return try {
-            val activityManager = getApplication<Application>().getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-            val memInfo = android.app.ActivityManager.MemoryInfo()
-            activityManager?.getMemoryInfo(memInfo)
-            memInfo?.totalMem ?: 0L < 1_500_000_000L // Less than 1.5GB total RAM
-        } catch (e: Exception) {
-            false
-        }
-    }
+    private fun checkIsLowMemoryDevice(): Boolean = SendspinSystemUtils.checkIsLowMemoryDevice(getApplication(), "PlayerViewModel")
 
     private fun checkIsTV(): Boolean {
         return try {
@@ -171,8 +163,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         return deviceId
     }
 
-    private val serviceDiscovery = ServiceDiscovery(app)
-    val discoveredServers: StateFlow<List<DiscoveredServer>> = serviceDiscovery.discoveredServers
+    private val serviceDiscovery by lazy { ServiceDiscovery(app) }
+    val discoveredServers: StateFlow<List<DiscoveredServer>>
+        get() = serviceDiscovery.discoveredServers
 
     private var service: SendspinService? = null
     private var serviceBound = false
@@ -188,6 +181,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 val localBinder = binder as? SendspinService.LocalBinder
                 service = localBinder?.getService()
                 serviceBound = true
+                localBinder?.setUiMirrorEnabled(true)
 
                 service?.let { svc ->
                     viewModelScope.launch {
@@ -267,9 +261,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         super.onCleared()
         serviceDiscovery.stopDiscovery()
+        service?.setUiDiagnosticsMirrorEnabled(false)
         if (serviceBound) {
             getApplication<Application>().unbindService(serviceConnection)
             serviceBound = false
+            service = null
         }
     }
 
@@ -295,6 +291,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun disconnect() {
         SendspinService.stopService(getApplication())
+
+        service?.setUiDiagnosticsMirrorEnabled(false)
 
         // Unbind from service when disconnecting
         if (serviceBound) {

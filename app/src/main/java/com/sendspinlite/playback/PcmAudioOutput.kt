@@ -37,6 +37,16 @@ class PcmAudioOutput {
         /** Safety ceiling for pipeline latency estimation (2 seconds). */
         private const val MAX_PIPELINE_LATENCY_US = 2_000_000L
         private const val SOFT_START_RAMP_MS = 35L
+
+        private const val BUFFER_FLOOR_MS_DEFAULT = 250
+        private const val BUFFER_FLOOR_MS_LEAN = 120
+    }
+
+    @Volatile
+    private var leanMode = false
+
+    fun setLeanMode(lean: Boolean) {
+        leanMode = lean
     }
 
     @Volatile
@@ -139,9 +149,10 @@ class PcmAudioOutput {
             lastMinBufBytes = minBuf
             val bytesPerFrame = channels * (bitDepth / 8)
 
-            // Define minimum baselines (100ms floor for raw minimum buffer, 250ms floor for playback track)
+            // Define minimum baselines (100ms floor for raw minimum buffer, device-specific playback track floor)
             val buffer100ms = (safeSampleRate * 0.10 * bytesPerFrame).toInt()
-            val buffer250ms = (safeSampleRate * 0.25 * bytesPerFrame).toInt()
+            val bufferFloorMs = if (leanMode) BUFFER_FLOOR_MS_LEAN else BUFFER_FLOOR_MS_DEFAULT
+            val bufferFloorBytes = (safeSampleRate * bufferFloorMs / 1000.0 * bytesPerFrame).toInt()
 
             // Safeguard minBuf: if HAL returns invalid or tiny value, use a solid 100ms baseline
             val safeMinBuf = maxOf(minBuf, buffer100ms)
@@ -156,10 +167,17 @@ class PcmAudioOutput {
                 } else {
                     0L
                 }
-            val multiplier = if (minBufMs > 40L) 2 else 4
+            val multiplier =
+                if (leanMode) {
+                    2
+                } else if (minBufMs > 40L) {
+                    2
+                } else {
+                    4
+                }
 
-            // Use at least 250ms buffer, or multiplier * safeMinBuf, whichever is larger, to ensure stability
-            val bufferBytes = maxOf(safeMinBuf * multiplier, buffer250ms)
+            // Use at least bufferFloorBytes, or multiplier * safeMinBuf, whichever is larger
+            val bufferBytes = maxOf(safeMinBuf * multiplier, bufferFloorBytes)
 
             val attrs =
                 AudioAttributes.Builder()
