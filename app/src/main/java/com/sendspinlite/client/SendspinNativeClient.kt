@@ -6,6 +6,8 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import com.sendspinlite.playback.PcmAudioOutput
+import com.sendspinlite.playback.PlaybackDiagnostics
+import com.sendspinlite.playback.PlaybackHealthRules
 import com.sendspinlite.system.SendspinSystemUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,8 +80,26 @@ class SendspinNativeClient(
     @Volatile
     private var lastDiagnosticsUpdateMs: Long = System.currentTimeMillis()
 
+    @Volatile
+    private var lastSuccessfulAudioWriteMs: Long = 0L
+
+    @Volatile
+    private var linkDegraded: Boolean = false
+
+    @Volatile
+    private var lastStreamSampleRate: Int = 0
+
+    @Volatile
+    private var lastStreamChannels: Int = 0
+
+    @Volatile
+    private var lastStreamBitDepth: Int = 0
+
+    private val starvationReported = AtomicBoolean(false)
+
     private var feedbackJob: Job? = null
     private var diagnosticsJob: Job? = null
+    private var healthJob: Job? = null
 
     init {
         synchronized(handleLock) {
@@ -126,14 +146,18 @@ class SendspinNativeClient(
         if (!connected || handle == 0L || !kotlin.coroutines.coroutineContext.isActive) return
 
         started.set(true)
+        starvationReported.set(false)
+        lastSuccessfulAudioWriteMs = System.currentTimeMillis()
         startFeedbackLoop()
         startDiagnosticsLoop()
+        startHealthMonitor()
     }
 
     fun close(reason: String) {
         started.set(false)
         feedbackJob?.cancel()
         diagnosticsJob?.cancel()
+        healthJob?.cancel()
         synchronized(handleLock) {
             val h = handle
             if (h != 0L) {
@@ -168,6 +192,8 @@ class SendspinNativeClient(
         feedbackJob = null
         diagnosticsJob?.cancel()
         diagnosticsJob = null
+        healthJob?.cancel()
+        healthJob = null
         close("resource_cleanup")
         synchronized(handleLock) {
             val h = handle
@@ -226,6 +252,19 @@ class SendspinNativeClient(
     fun trimAudioBufferModerate() = Log.i(tag, "trimAudioBufferModerate: no-op (native ring buffer)")
 
     fun trimAudioBufferLow() = Log.i(tag, "trimAudioBufferLow: no-op (native ring buffer)")
+
+    /** Called when the OS signals the active network link is degrading (e.g. Wi-Fi roam). */
+    fun notifyLinkDegrading(maxMsToLive: Int) {
+        linkDegraded = true
+        Log.w(tag, "Network link degrading (maxMsToLive=${maxMsToLive}ms); tightening starvation thresholds")
+    }
+
+    fun clearLinkDegraded() {
+        if (linkDegraded) {
+            linkDegraded = false
+            Log.i(tag, "Network link stable; restoring normal starvation thresholds")
+        }
+    }
 
     fun isHealthy(): Boolean {
         if (!started.get()) return true
@@ -298,6 +337,89 @@ class SendspinNativeClient(
             }
     }
 
+    private fun startHealthMonitor() {
+        healthJob?.cancel()
+        healthJob =
+            scope.launch {
+                while (isActive && started.get()) {
+                    checkPlaybackHealth()
+                    delay(HEALTH_CHECK_INTERVAL_MS)
+                }
+            }
+    }
+
+    private fun checkPlaybackHealth() {
+        val diag = _diagnostics.value
+        if (diag.playbackState != "playing") {
+            starvationReported.set(false)
+            return
+        }
+
+        maybeRecoverAudioTrack()
+
+        if (!diag.audioOutputStarted) return
+
+        val now = System.currentTimeMillis()
+        val msSinceWrite =
+            if (lastSuccessfulAudioWriteMs > 0L) {
+                now - lastSuccessfulAudioWriteMs
+            } else {
+                -1L
+            }
+        val outputQueueMs = output.getOutputQueueMs()
+
+        if (
+            PlaybackHealthRules.shouldReportStarvation(
+                playbackState = diag.playbackState,
+                audioOutputStarted = diag.audioOutputStarted,
+                connected = diag.connected,
+                msSinceLastWrite = msSinceWrite,
+                outputQueueMs = outputQueueMs,
+                linkDegraded = linkDegraded,
+            )
+        ) {
+            if (starvationReported.compareAndSet(false, true)) {
+                Log.w(
+                    tag,
+                    "Playback starvation detected: msSinceWrite=$msSinceWrite queueMs=$outputQueueMs " +
+                        "connected=${diag.connected} linkDegraded=$linkDegraded",
+                )
+                updateDiagnostics {
+                    it.copy(
+                        playbackRecoveryStatus = PlaybackDiagnostics.STATUS_STARVATION_RECONNECT,
+                        lastRecoveryEvent =
+                            "starvation msSinceWrite=$msSinceWrite queueMs=$outputQueueMs " +
+                                "connected=${diag.connected}",
+                    )
+                }
+                _events.tryEmit(ClientEvent.PlaybackStarvation(msSinceWrite, outputQueueMs))
+            }
+        } else if (msSinceWrite in 0 until PlaybackDiagnostics.STARVATION_NO_WRITE_MS) {
+            starvationReported.set(false)
+        }
+    }
+
+    private fun maybeRecoverAudioTrack() {
+        if (lastStreamSampleRate <= 0) return
+        if (output.isStarted()) return
+
+        Log.w(
+            tag,
+            "AudioTrack not started during playback; recreating sr=$lastStreamSampleRate " +
+                "ch=$lastStreamChannels bd=$lastStreamBitDepth",
+        )
+        output.start(lastStreamSampleRate, lastStreamChannels, lastStreamBitDepth)
+        output.syncPlaybackFeedbackBaseline()
+        lastSuccessfulAudioWriteMs = System.currentTimeMillis()
+        updateDiagnostics {
+            it.copy(
+                audioOutputStarted = output.isStarted(),
+                playbackRecoveryStatus = PlaybackDiagnostics.STATUS_UNDERRUN,
+                lastRecoveryEvent = "audiotrack_recreate",
+            )
+        }
+    }
+
     private fun publishDiagnostics(snapshot: DiagnosticsSnapshot) {
         lastDiagnosticsUpdateMs = System.currentTimeMillis()
         val outputStarted = output.isStarted()
@@ -353,8 +475,17 @@ class SendspinNativeClient(
         length: Int,
         timeoutMs: Int,
     ): Int {
-        if (!output.isStarted()) return 0
-        return output.writePcm(buffer, length, timeoutMs)
+        if (!output.isStarted()) {
+            maybeRecoverAudioTrack()
+            if (!output.isStarted()) return 0
+        }
+        val written = output.writePcm(buffer, length, timeoutMs)
+        if (written > 0) {
+            lastSuccessfulAudioWriteMs = System.currentTimeMillis()
+            linkDegraded = false
+            starvationReported.set(false)
+        }
+        return written
     }
 
     override fun onStreamStart(
@@ -363,6 +494,11 @@ class SendspinNativeClient(
         bitDepth: Int,
     ) {
         Log.i(tag, "Stream start sr=$sampleRate ch=$channels bd=$bitDepth")
+        lastStreamSampleRate = sampleRate
+        lastStreamChannels = channels
+        lastStreamBitDepth = bitDepth
+        lastSuccessfulAudioWriteMs = System.currentTimeMillis()
+        starvationReported.set(false)
         output.start(sampleRate, channels, bitDepth)
         output.syncPlaybackFeedbackBaseline()
         updateDiagnostics {
@@ -536,6 +672,7 @@ class SendspinNativeClient(
         private const val AUDIO_BUFFER_CAPACITY = 2_000_000L
         private const val FEEDBACK_INTERVAL_MS = 5L
         private const val DIAGNOSTICS_INTERVAL_MS = 250L
+        private const val HEALTH_CHECK_INTERVAL_MS = 200L
 
         /** Nominal chunk duration used for output-queue → chunk count UI mapping. */
         private const val CHUNK_MS = 20L

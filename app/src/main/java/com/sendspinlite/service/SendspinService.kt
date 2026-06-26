@@ -14,6 +14,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Binder
 import android.os.Build
@@ -108,7 +109,11 @@ class SendspinService : Service() {
 
     // Network connectivity receiver for auto-reconnect
     private var connectivityReceiver: BroadcastReceiver? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastNetworkState: Boolean = false
+
+    @Volatile
+    private var lastStarvationReconnectMs: Long = 0L
 
     private var volumeChangeReceiver: BroadcastReceiver? = null
 
@@ -204,11 +209,12 @@ class SendspinService : Service() {
                 @Suppress("DEPRECATION")
                 wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL, "SendspinService::WifiLock")
             }.apply {
-                setReferenceCounted(false)
+                setReferenceCounted(true)
             }
 
         // Register network connectivity receiver
         registerNetworkReceiver()
+        registerNetworkCallback()
 
         // Register volume change receiver for background volume monitoring
         registerVolumeChangeReceiver()
@@ -232,6 +238,23 @@ class SendspinService : Service() {
                         if (lock.isHeld) {
                             lock.release()
                             Log.i(tag, "WakeLock released dynamically (not playing)")
+                        }
+                    }
+                }
+
+                // Keep Wi-Fi in high-performance mode for the whole playback session so roams are
+                // less likely to starve the WebSocket while AudioTrack drains.
+                val shouldHoldWifiLock = state.connected && state.playbackState == "playing"
+                wifiLock?.let { lock ->
+                    if (shouldHoldWifiLock) {
+                        if (!lock.isHeld) {
+                            lock.acquire()
+                            Log.i(tag, "WifiLock acquired dynamically (playing)")
+                        }
+                    } else {
+                        if (lock.isHeld) {
+                            lock.release()
+                            Log.i(tag, "WifiLock released dynamically (not playing)")
                         }
                     }
                 }
@@ -331,6 +354,7 @@ class SendspinService : Service() {
 
         // Unregister network connectivity receiver
         unregisterNetworkReceiver()
+        unregisterNetworkCallback()
 
         // Unregister volume change receiver
         unregisterVolumeChangeReceiver()
@@ -745,6 +769,9 @@ class SendspinService : Service() {
                                         staticDelayMsFromServer = false,
                                     )
                             }
+                            is ClientEvent.PlaybackStarvation -> {
+                                handlePlaybackStarvation(event)
+                            }
                         }
                     }
             }
@@ -986,6 +1013,91 @@ class SendspinService : Service() {
             }
         }
         connectivityReceiver = null
+    }
+
+    private fun registerNetworkCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            val callback =
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onLosing(
+                        network: Network,
+                        maxMsToLive: Int,
+                    ) {
+                        if (_uiState.value.playbackState != "playing") return
+                        Log.i(tag, "Default network losing (maxMsToLive=${maxMsToLive}ms) during playback")
+                        client?.notifyLinkDegrading(maxMsToLive)
+                    }
+
+                    override fun onCapabilitiesChanged(
+                        network: Network,
+                        networkCapabilities: NetworkCapabilities,
+                    ) {
+                        if (_uiState.value.playbackState != "playing") return
+                        if (networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                            client?.clearLinkDegraded()
+                        }
+                    }
+
+                    override fun onLost(network: Network) {
+                        Log.i(tag, "Default network lost")
+                        client?.notifyLinkDegrading(0)
+                    }
+                }
+            networkCallback = callback
+            cm.registerDefaultNetworkCallback(callback)
+            Log.i(tag, "Network callback registered")
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to register network callback", e)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            networkCallback?.let { callback ->
+                cm?.unregisterNetworkCallback(callback)
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to unregister network callback", e)
+        }
+        networkCallback = null
+    }
+
+    private fun handlePlaybackStarvation(event: ClientEvent.PlaybackStarvation) {
+        val now = System.currentTimeMillis()
+        if (now - lastStarvationReconnectMs < com.sendspinlite.playback.PlaybackDiagnostics.STARVATION_RECONNECT_COOLDOWN_MS) {
+            Log.i(tag, "Ignoring playback starvation (cooldown): $event")
+            return
+        }
+
+        val state = _uiState.value
+        if (state.wsUrl.isBlank() || state.clientId.isBlank() || state.clientName.isBlank()) {
+            Log.w(tag, "Playback starvation but connection params missing; skipping reconnect")
+            return
+        }
+
+        lastStarvationReconnectMs = now
+        Log.w(
+            tag,
+            "Playback starvation — forcing reconnect (msSinceWrite=${event.msSinceLastWrite}, " +
+                "queueMs=${event.outputQueueMs})",
+        )
+
+        scope.launch {
+            try {
+                client?.close("playback_starvation")
+                delay(400)
+                val fresh = _uiState.value
+                if (fresh.wsUrl.isNotBlank() && fresh.clientId.isNotBlank()) {
+                    connect(fresh.wsUrl, fresh.clientId, fresh.clientName, fromBoot = false)
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Starvation reconnect failed", e)
+            }
+        }
     }
 
     private fun isNetworkAvailable(): Boolean {

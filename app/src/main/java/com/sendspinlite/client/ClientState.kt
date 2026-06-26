@@ -83,4 +83,10 @@ sealed interface ClientEvent {
     data class ServerMutedChanged(val muted: Boolean) : ClientEvent
 
     data class ServerStaticDelayChanged(val delayMs: Long) : ClientEvent
+
+    /** Playback pipeline starved (network stall / AudioTrack drain); service should reconnect. */
+    data class PlaybackStarvation(
+        val msSinceLastWrite: Long,
+        val outputQueueMs: Long,
+    ) : ClientEvent
 }

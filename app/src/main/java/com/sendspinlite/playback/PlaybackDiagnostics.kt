@@ -27,4 +27,23 @@ object PlaybackDiagnostics {
     const val STATUS_AUDIO_CUT = "audio_cut"
     const val STATUS_DISCONTINUITY = "discontinuity_recovery"
     const val STATUS_UNDERRUN = "buffer_underrun"
+    const val STATUS_STARVATION_RECONNECT = "starvation_reconnect"
+
+    /** No PCM written for this long while playing → force reconnect. */
+    const val STARVATION_NO_WRITE_MS = 1_200L
+
+    /** Shorter threshold after the OS signals the link is degrading (e.g. Wi-Fi roam). */
+    const val STARVATION_NO_WRITE_DEGRADED_MS = 700L
+
+    /** Connected WebSocket but no inbound audio for this long → likely wedged TCP after roam. */
+    const val STARVATION_CONNECTED_STALL_MS = 1_800L
+
+    /** Output queue at or below this level is considered nearly empty. */
+    const val STARVATION_LOW_BUFFER_MS = 40L
+
+    /** Require at least this much time since the last write before acting on low buffer. */
+    const val STARVATION_LOW_BUFFER_GRACE_MS = 500L
+
+    /** Minimum interval between starvation-triggered reconnects. */
+    const val STARVATION_RECONNECT_COOLDOWN_MS = 10_000L
 }

@@ -128,6 +128,9 @@ object AudioIssueReporter {
         if (uiState.lastAudioCutAgeMs in 0..PlaybackDiagnostics.RECENT_AUDIO_CUT_MAX_AGE_MS) {
             hints.add("- Audio cut occurred recently (check DIAG audio_cut and serverLate)")
         }
+        if (uiState.playbackRecoveryStatus == PlaybackDiagnostics.STATUS_STARVATION_RECONNECT) {
+            hints.add("- Playback starvation reconnect triggered (likely Wi-Fi roam or wedged WebSocket)")
+        }
         if (uiState.serverLatenessMs > PlaybackDiagnostics.AUDIO_CUT_SERVER_LATE_MS) {
             hints.add("- Server lateness above cut threshold (${uiState.serverLatenessMs}ms)")
         }
