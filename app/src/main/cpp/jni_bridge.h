@@ -1,6 +1,6 @@
 // Shared declarations for the SendSpin Android JNI bridge.
 //
-// The bridge wraps a sendspin::SendspinClient (player + metadata roles) and forwards
+// The bridge wraps a sendspin::SendspinClient (player + metadata + controller roles) and forwards
 // protocol/audio events to a Kotlin SendspinNativeCallbacks object via JNI.
 
 #pragma once
@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "sendspin/client.h"
+#include "sendspin/controller_role.h"
 #include "sendspin/metadata_role.h"
 #include "sendspin/player_role.h"
 
@@ -37,6 +38,8 @@ struct CallbackMethods {
     jmethodID on_metadata_update = nullptr;   // (5×String,I,I,I,I)V
     jmethodID on_metadata_clear = nullptr;    // ()V
     jmethodID on_group_update = nullptr;      // (3×String)V
+    jmethodID on_controller_state = nullptr;  // ([String;IZLjava/lang/String;Z)V
+    jmethodID on_controller_state_clear = nullptr;  // ()V
     jmethodID on_time_sync_updated = nullptr; // (F)V
     jmethodID on_request_high_performance = nullptr;  // ()V
     jmethodID on_release_high_performance = nullptr;  // ()V
@@ -47,6 +50,7 @@ struct CallbackMethods {
 // Forward declarations of the listener implementations.
 class AndroidPlayerListener;
 class AndroidMetadataListener;
+class AndroidControllerListener;
 class AndroidClientListener;
 class AndroidNetworkProvider;
 
@@ -67,6 +71,7 @@ public:
     void UpdateVolume(uint8_t volume);
     void UpdateMuted(bool muted);
     void UpdateStaticDelay(uint16_t delay_ms);
+    bool SendControllerCommand(const std::string& command);
 
     bool IsConnected() const;
     bool IsTimeSynced() const;
@@ -90,9 +95,11 @@ private:
     std::unique_ptr<sendspin::SendspinClient> client_;
     sendspin::PlayerRole* player_ = nullptr;
     sendspin::MetadataRole* metadata_ = nullptr;
+    sendspin::ControllerRole* controller_ = nullptr;
 
     std::unique_ptr<AndroidPlayerListener> player_listener_;
     std::unique_ptr<AndroidMetadataListener> metadata_listener_;
+    std::unique_ptr<AndroidControllerListener> controller_listener_;
     std::unique_ptr<AndroidClientListener> client_listener_;
     std::unique_ptr<AndroidNetworkProvider> network_provider_;
 

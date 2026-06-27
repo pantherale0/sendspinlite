@@ -5,10 +5,12 @@
 #include <android/log.h>
 
 #include <chrono>
+#include <optional>
 #include <string>
 #include <thread>
 
 #include "android_client_listener.h"
+#include "android_controller_listener.h"
 #include "android_metadata_listener.h"
 #include "android_network_provider.h"
 #include "android_player_listener.h"
@@ -67,6 +69,11 @@ ClientHandle::ClientHandle(JNIEnv* env, jobject callbacks, sendspin::SendspinCli
     methods_.on_metadata_clear = env->GetMethodID(cls, "onMetadataClear", "()V");
     methods_.on_group_update = env->GetMethodID(
         cls, "onGroupUpdate", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+    methods_.on_controller_state = env->GetMethodID(
+        cls, "onControllerState",
+        "([Ljava/lang/String;IZLjava/lang/String;Z)V");
+    methods_.on_controller_state_clear =
+        env->GetMethodID(cls, "onControllerStateClear", "()V");
     methods_.on_time_sync_updated = env->GetMethodID(cls, "onTimeSyncUpdated", "(F)V");
     methods_.on_request_high_performance =
         env->GetMethodID(cls, "onRequestHighPerformance", "()V");
@@ -79,6 +86,7 @@ ClientHandle::ClientHandle(JNIEnv* env, jobject callbacks, sendspin::SendspinCli
 
     player_listener_ = std::make_unique<AndroidPlayerListener>(this);
     metadata_listener_ = std::make_unique<AndroidMetadataListener>(this);
+    controller_listener_ = std::make_unique<AndroidControllerListener>(this);
     client_listener_ = std::make_unique<AndroidClientListener>(this);
     network_provider_ = std::make_unique<AndroidNetworkProvider>(this);
 
@@ -89,6 +97,9 @@ ClientHandle::ClientHandle(JNIEnv* env, jobject callbacks, sendspin::SendspinCli
 
     metadata_ = &client_->add_metadata();
     metadata_->set_listener(metadata_listener_.get());
+
+    controller_ = &client_->add_controller();
+    controller_->set_listener(controller_listener_.get());
 
     client_->set_listener(client_listener_.get());
     client_->set_network_provider(network_provider_.get());
@@ -177,6 +188,66 @@ void ClientHandle::UpdateStaticDelay(uint16_t delay_ms) {
     if (player_ != nullptr) {
         player_->update_static_delay(delay_ms);
     }
+}
+
+namespace {
+
+std::optional<sendspin::SendspinControllerCommand> ControllerCommandFromString(
+    const std::string& command) {
+    if (command == "play") {
+        return sendspin::SendspinControllerCommand::PLAY;
+    }
+    if (command == "pause") {
+        return sendspin::SendspinControllerCommand::PAUSE;
+    }
+    if (command == "stop") {
+        return sendspin::SendspinControllerCommand::STOP;
+    }
+    if (command == "next") {
+        return sendspin::SendspinControllerCommand::NEXT;
+    }
+    if (command == "previous") {
+        return sendspin::SendspinControllerCommand::PREVIOUS;
+    }
+    if (command == "volume") {
+        return sendspin::SendspinControllerCommand::VOLUME;
+    }
+    if (command == "mute") {
+        return sendspin::SendspinControllerCommand::MUTE;
+    }
+    if (command == "repeat_off") {
+        return sendspin::SendspinControllerCommand::REPEAT_OFF;
+    }
+    if (command == "repeat_one") {
+        return sendspin::SendspinControllerCommand::REPEAT_ONE;
+    }
+    if (command == "repeat_all") {
+        return sendspin::SendspinControllerCommand::REPEAT_ALL;
+    }
+    if (command == "shuffle") {
+        return sendspin::SendspinControllerCommand::SHUFFLE;
+    }
+    if (command == "unshuffle") {
+        return sendspin::SendspinControllerCommand::UNSHUFFLE;
+    }
+    if (command == "switch") {
+        return sendspin::SendspinControllerCommand::SWITCH;
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+bool ClientHandle::SendControllerCommand(const std::string& command) {
+    if (controller_ == nullptr) {
+        return false;
+    }
+    const auto parsed = ControllerCommandFromString(command);
+    if (!parsed.has_value()) {
+        return false;
+    }
+    controller_->send_command(*parsed);
+    return true;
 }
 
 bool ClientHandle::IsConnected() const {
@@ -290,6 +361,14 @@ JNIEXPORT void JNICALL Java_com_sendspinlite_client_SendspinNative_nativeUpdateM
 JNIEXPORT void JNICALL Java_com_sendspinlite_client_SendspinNative_nativeUpdateStaticDelay(
     JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint delay_ms) {
     reinterpret_cast<ClientHandle*>(handle)->UpdateStaticDelay(static_cast<uint16_t>(delay_ms));
+}
+
+JNIEXPORT jboolean JNICALL Java_com_sendspinlite_client_SendspinNative_nativeSendControllerCommand(
+    JNIEnv* env, jobject /*thiz*/, jlong handle, jstring command) {
+    return reinterpret_cast<ClientHandle*>(handle)->SendControllerCommand(
+               sendspin_jni::ToStdString(env, command))
+               ? JNI_TRUE
+               : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_sendspinlite_client_SendspinNative_nativeIsConnected(

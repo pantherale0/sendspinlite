@@ -18,8 +18,11 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
@@ -42,6 +45,31 @@ class SendspinService : Service() {
     private val binder = LocalBinder()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val auxiliaryLock = Any()
+
+    private val mediaSessionCallback =
+        object : MediaSessionCompat.Callback() {
+            override fun onPlay() {
+                dispatchTransportCommand("play")
+            }
+
+            override fun onPause() {
+                dispatchTransportCommand("pause")
+            }
+
+            override fun onSkipToNext() {
+                dispatchTransportCommand("next")
+            }
+
+            override fun onSkipToPrevious() {
+                dispatchTransportCommand("previous")
+            }
+
+            override fun onStop() {
+                dispatchTransportCommand("stop")
+            }
+        }
 
     private var auxiliaryStarted = false
     private var uiStateCollectorsJob: Job? = null
@@ -239,64 +267,92 @@ class SendspinService : Service() {
     /**
      * Network receivers, MediaSession, and state collectors are deferred until the first
      * [connect] to keep sticky-restart / LMK recovery paths as light as possible.
+     *
+     * MediaSessionCompat is not thread-safe; all session work runs on the main looper.
      */
     private fun ensureAuxiliaryStarted() {
-        if (auxiliaryStarted) return
-        auxiliaryStarted = true
-        Log.i(tag, "Starting deferred service components")
-
-        registerNetworkReceiver()
-        registerNetworkCallback()
-        registerVolumeChangeReceiver()
-
-        mediaSession =
-            MediaSessionCompat(this, "SendspinMediaSession").apply {
-                isActive = true
-            }
-
-        uiStateCollectorsJob?.cancel()
-        uiStateCollectorsJob =
-            scope.launch {
-                _uiState.collect { state ->
-                    val shouldHoldWakeLock = state.connected && state.playbackState == "playing"
-                    wakeLock?.let { lock ->
-                        if (shouldHoldWakeLock) {
-                            if (!lock.isHeld) {
-                                lock.acquire()
-                                Log.i(tag, "WakeLock acquired dynamically (playing)")
-                            }
-                        } else {
-                            if (lock.isHeld) {
-                                lock.release()
-                                Log.i(tag, "WakeLock released dynamically (not playing)")
-                            }
-                        }
-                    }
-
-                    val shouldHoldWifiLock = state.connected && state.playbackState == "playing"
-                    wifiLock?.let { lock ->
-                        if (shouldHoldWifiLock) {
-                            if (!lock.isHeld) {
-                                lock.acquire()
-                                Log.i(tag, "WifiLock acquired dynamically (playing)")
-                            }
-                        } else {
-                            if (lock.isHeld) {
-                                lock.release()
-                                Log.i(tag, "WifiLock released dynamically (not playing)")
-                            }
-                        }
-                    }
-
-                    if (shouldAutoReconnect(state.status) && reconnectJob == null) {
-                        Log.i(tag, "Connection lost (${state.status}), starting auto-reconnect")
-                        startAutoReconnect(state.wsUrl, state.clientId, state.clientName)
-                    }
-
-                    updateMediaSessionState()
-                }
-            }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            ensureAuxiliaryStartedOnMain()
+        } else {
+            runBlocking(Dispatchers.Main.immediate) { ensureAuxiliaryStartedOnMain() }
+        }
     }
+
+    private fun ensureAuxiliaryStartedOnMain() {
+        synchronized(auxiliaryLock) {
+            if (auxiliaryStarted) {
+                if (mediaSession == null) {
+                    mediaSession = createMediaSession()
+                    updateMediaSessionStateOnMain()
+                    updateNotification()
+                }
+                return
+            }
+
+            Log.i(tag, "Starting deferred service components")
+
+            registerNetworkReceiver()
+            registerNetworkCallback()
+            registerVolumeChangeReceiver()
+
+            mediaSession = createMediaSession()
+
+            uiStateCollectorsJob?.cancel()
+            uiStateCollectorsJob =
+                scope.launch {
+                    _uiState.collect { state ->
+                        val shouldHoldWakeLock = state.connected && state.playbackState == "playing"
+                        wakeLock?.let { lock ->
+                            if (shouldHoldWakeLock) {
+                                if (!lock.isHeld) {
+                                    lock.acquire()
+                                    Log.i(tag, "WakeLock acquired dynamically (playing)")
+                                }
+                            } else {
+                                if (lock.isHeld) {
+                                    lock.release()
+                                    Log.i(tag, "WakeLock released dynamically (not playing)")
+                                }
+                            }
+                        }
+
+                        val shouldHoldWifiLock = state.connected && state.playbackState == "playing"
+                        wifiLock?.let { lock ->
+                            if (shouldHoldWifiLock) {
+                                if (!lock.isHeld) {
+                                    lock.acquire()
+                                    Log.i(tag, "WifiLock acquired dynamically (playing)")
+                                }
+                            } else {
+                                if (lock.isHeld) {
+                                    lock.release()
+                                    Log.i(tag, "WifiLock released dynamically (not playing)")
+                                }
+                            }
+                        }
+
+                        if (shouldAutoReconnect(state.status) && reconnectJob == null) {
+                            Log.i(tag, "Connection lost (${state.status}), starting auto-reconnect")
+                            startAutoReconnect(state.wsUrl, state.clientId, state.clientName)
+                        }
+
+                        updateMediaSessionState()
+                    }
+                }
+
+            auxiliaryStarted = true
+            updateMediaSessionStateOnMain()
+            updateNotification()
+        }
+    }
+
+    private fun createMediaSession(): MediaSessionCompat =
+        MediaSessionCompat(this, "SendspinMediaSession").apply {
+            setCallback(mediaSessionCallback)
+            isActive = true
+        }.also {
+            Log.i(tag, "MediaSession created and activated")
+        }
 
     override fun onStartCommand(
         intent: Intent?,
@@ -323,7 +379,7 @@ class SendspinService : Service() {
 
         val mediaAction = intent.getStringExtra("media_action")
         if (mediaAction != null) {
-            Log.i(tag, "Ignored media action: $mediaAction (not supported by native client)")
+            dispatchTransportCommand(mediaAction)
             return START_STICKY
         }
 
@@ -519,6 +575,14 @@ class SendspinService : Service() {
     }
 
     private fun updateMediaSessionState() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            updateMediaSessionStateOnMain()
+        } else {
+            mainHandler.post { updateMediaSessionStateOnMain() }
+        }
+    }
+
+    private fun updateMediaSessionStateOnMain() {
         val session = mediaSession ?: return
         val state = _uiState.value
         val playState =
@@ -531,17 +595,42 @@ class SendspinService : Service() {
                 }
             }
 
+        val transportActions = buildTransportActions(state.supportedCommands)
+
         val playbackState =
             PlaybackStateCompat.Builder()
                 .setState(playState, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1.0f)
-                .setActions(
-                    PlaybackStateCompat.ACTION_PLAY or
-                        PlaybackStateCompat.ACTION_PAUSE or
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS,
-                )
+                .setActions(transportActions)
                 .build()
         session.setPlaybackState(playbackState)
+
+        val metadata =
+            MediaMetadataCompat.Builder().apply {
+                state.trackTitle?.let { putString(MediaMetadataCompat.METADATA_KEY_TITLE, it) }
+                state.trackArtist?.let { putString(MediaMetadataCompat.METADATA_KEY_ARTIST, it) }
+                state.albumTitle?.let { putString(MediaMetadataCompat.METADATA_KEY_ALBUM, it) }
+            }.build()
+        session.setMetadata(metadata)
+    }
+
+    private fun buildTransportActions(commands: Set<String>): Long {
+        var actions = 0L
+        if ("play" in commands) actions = actions or PlaybackStateCompat.ACTION_PLAY
+        if ("pause" in commands) actions = actions or PlaybackStateCompat.ACTION_PAUSE
+        if ("next" in commands) actions = actions or PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+        if ("previous" in commands) actions = actions or PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+        if ("stop" in commands) actions = actions or PlaybackStateCompat.ACTION_STOP
+        return actions
+    }
+
+    private fun dispatchTransportCommand(command: String) {
+        val supported = _uiState.value.supportedCommands
+        if (supported.isNotEmpty() && command !in supported) {
+            Log.i(tag, "Ignoring unsupported transport command: $command")
+            return
+        }
+        val sent = client?.sendTransportCommand(command) == true
+        Log.i(tag, "Transport command '$command' dispatched (sent=$sent)")
     }
 
     private fun createMediaActionIntent(action: String): PendingIntent {

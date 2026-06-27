@@ -51,6 +51,16 @@ internal interface SendspinNativeCallbacks {
         groupName: String?,
     )
 
+    fun onControllerState(
+        supportedCommands: Array<String>,
+        volume: Int,
+        muted: Boolean,
+        repeatMode: String,
+        shuffle: Boolean,
+    )
+
+    fun onControllerStateClear()
+
     fun onTimeSyncUpdated(errorUs: Float)
 
     fun onRequestHighPerformance()
@@ -121,6 +131,11 @@ internal object SendspinNative {
         handle: Long,
         delayMs: Int,
     )
+
+    external fun nativeSendControllerCommand(
+        handle: Long,
+        command: String,
+    ): Boolean
 
     external fun nativeIsConnected(handle: Long): Boolean
 

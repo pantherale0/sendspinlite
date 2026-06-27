@@ -261,6 +261,20 @@ class SendspinNativeClient(
         updateDiagnostics { it.copy(playerMuted = muted, playerMutedFromServer = false) }
     }
 
+    /** Sends a transport command (play, pause, next, previous, stop, etc.) to the server. */
+    fun sendTransportCommand(command: String): Boolean {
+        val sent =
+            withHandle { h ->
+                SendspinNative.nativeSendControllerCommand(h, command)
+            } ?: false
+        if (sent) {
+            Log.i(tag, "Sent transport command: $command")
+        } else {
+            Log.w(tag, "Failed to send transport command: $command")
+        }
+        return sent
+    }
+
     /**
      * Retained for API parity. sendspin-cpp exposes no runtime setter for the fixed pipeline
      * delay; sync is driven by notify_audio_played feedback instead.
@@ -678,6 +692,37 @@ class SendspinNativeClient(
         }
     }
 
+    override fun onControllerState(
+        supportedCommands: Array<String>,
+        volume: Int,
+        muted: Boolean,
+        repeatMode: String,
+        shuffle: Boolean,
+    ) {
+        val commands = supportedCommands.toSet()
+        updateDiagnostics {
+            it.copy(
+                hasController = commands.isNotEmpty(),
+                supportedCommands = commands,
+                groupVolume = volume,
+                groupMuted = muted,
+                repeatMode = repeatMode,
+                shuffleEnabled = shuffle,
+            )
+        }
+    }
+
+    override fun onControllerStateClear() {
+        updateDiagnostics {
+            it.copy(
+                hasController = false,
+                supportedCommands = emptySet(),
+                repeatMode = null,
+                shuffleEnabled = null,
+            )
+        }
+    }
+
     override fun onTimeSyncUpdated(errorUs: Float) {
         val uncertaintyUs = errorUs.toLong().coerceAtLeast(0L)
         if (firstTimeSyncedAtMs == 0L && uncertaintyUs > 0L) {
@@ -780,7 +825,7 @@ class SendspinNativeClient(
         /** Nominal chunk duration used for output-queue → chunk count UI mapping. */
         private const val CHUNK_MS = 20L
 
-        /** Roles compiled into the native client (player + metadata). */
-        private const val ACTIVE_ROLES = "player, metadata"
+        /** Roles compiled into the native client (player + metadata + controller). */
+        private const val ACTIVE_ROLES = "player, metadata, controller"
     }
 }

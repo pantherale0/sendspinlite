@@ -26,7 +26,7 @@ endif()
 # keep the native binary small and avoid pulling unused codec/UI dependencies.
 set(SENDSPIN_ENABLE_PLAYER ON CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_METADATA ON CACHE BOOL "" FORCE)
-set(SENDSPIN_ENABLE_CONTROLLER OFF CACHE BOOL "" FORCE)
+set(SENDSPIN_ENABLE_CONTROLLER ON CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_COLOR OFF CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_ARTWORK OFF CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_VISUALIZER OFF CACHE BOOL "" FORCE)
@@ -56,6 +56,7 @@ add_library(sendspin_jni SHARED
     android_player_listener.cpp
     android_metadata_listener.cpp
     android_client_listener.cpp
+    android_controller_listener.cpp
     android_network_provider.cpp
 )
 
