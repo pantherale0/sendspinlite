@@ -12,7 +12,7 @@
     <ID>CyclomaticComplexMethod:PcmAudioOutput.kt$PcmAudioOutput$fun writePcm(pcm: ByteArray): Boolean</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$fun connect( wsUrl: String, clientId: String, clientName: String, fromBoot: Boolean = false, )</ID>
     <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun createNotification(): Notification</ID>
-    <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun ensureAuxiliaryStarted()</ID>
+    <ID>CyclomaticComplexMethod:SendspinService.kt$SendspinService$private fun ensureAuxiliaryStartedOnMain()</ID>
     <ID>FunctionNaming:MainActivity.kt$@Composable fun SyncInfoRow( label: String, value: String, color: androidx.compose.ui.graphics.Color = MaterialTheme.colors.onSurface, )</ID>
     <ID>FunctionNaming:MainActivity.kt$@Composable private fun PlayerScreen(vm: PlayerViewModel)</ID>
     <ID>ImplicitDefaultLocale:MainActivity.kt$String.format("%.1f", uiState.smoothedLatencyMs)</ID>
@@ -139,7 +139,7 @@
     <ID>MagicNumber:SendspinService.kt$SendspinService.&lt;no name provided&gt;$100</ID>
     <ID>MagicNumber:SendspinService.kt$SendspinService.&lt;no name provided&gt;$1000</ID>
     <ID>MagicNumber:SendspinSystemUtils.kt$SendspinSystemUtils$100</ID>
-    <ID>MagicNumber:SendspinSystemUtils.kt$SendspinSystemUtils$2_000_000_000L</ID>
+    <ID>MagicNumber:SendspinSystemUtils.kt$SendspinSystemUtils$1_250_000_000L</ID>
     <ID>MaxLineLength:AppMemoryPolicy.kt$AppMemoryPolicy$fun diagnosticsIntervalMs(lean: Boolean): Long</ID>
     <ID>MaxLineLength:AppMemoryPolicy.kt$AppMemoryPolicy$fun eventBufferCapacity(lean: Boolean): Int</ID>
     <ID>MaxLineLength:AppMemoryPolicy.kt$AppMemoryPolicy$fun healthCheckIntervalMs(lean: Boolean): Long</ID>
@@ -189,12 +189,14 @@
     <ID>ReturnCount:PcmFormatSupport.kt$PcmFormatSupport$private fun isStructurallyValid(format: AudioFormat): Boolean</ID>
     <ID>ReturnCount:PlaybackHealthRules.kt$PlaybackHealthRules$fun shouldReportStarvation( playbackState: String, audioOutputStarted: Boolean, connected: Boolean, msSinceLastWrite: Long, outputQueueMs: Long, linkDegraded: Boolean, ): Boolean</ID>
     <ID>ReturnCount:SendspinAudioWarmup.kt$SendspinAudioWarmup$suspend fun runIfNeeded( context: Context, output: PcmAudioOutput, tag: String, )</ID>
+    <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$fun isHealthy(): Boolean</ID>
     <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$override fun isNetworkReady(): Boolean</ID>
     <ID>ReturnCount:SendspinNativeClient.kt$SendspinNativeClient$private fun ensureNativeHandleLocked(): Boolean</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$override fun onStartCommand( intent: Intent?, flags: Int, startId: Int, ): Int</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$private fun applyDiagnosticsFromClient(diag: ClientDiagnostics)</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$private fun isNetworkAvailable(): Boolean</ID>
     <ID>ReturnCount:SendspinService.kt$SendspinService$private fun reconnectFromSavedCredentialsIfIdle()</ID>
+    <ID>ReturnCount:SendspinService.kt$SendspinService$private fun shouldAutoReconnect(status: String): Boolean</ID>
     <ID>ReturnCount:SendspinSystemUtils.kt$SendspinSystemUtils$fun isBatteryOptimizationIgnored(context: Context): Boolean</ID>
     <ID>SpreadOperator:SendspinService.kt$SendspinService$(*actionIndices.toIntArray())</ID>
     <ID>SwallowedException:PcmAudioOutput.kt$PcmAudioOutput$e: UnsupportedOperationException</ID>
