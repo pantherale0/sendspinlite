@@ -331,7 +331,7 @@ class SendspinNativeClient(
         val diag = _diagnostics.value
         if (
             !diag.connected &&
-                (diag.status.startsWith("closed:") || diag.status.startsWith("failure:"))
+            (diag.status.startsWith("closed:") || diag.status.startsWith("failure:"))
         ) {
             return false
         }
