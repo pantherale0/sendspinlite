@@ -288,8 +288,8 @@ class SendspinService : Service() {
                         }
                     }
 
-                    if (state.status.startsWith("failure:") && reconnectJob == null) {
-                        Log.i(tag, "Connection failed, starting auto-reconnect")
+                    if (shouldAutoReconnect(state.status) && reconnectJob == null) {
+                        Log.i(tag, "Connection lost (${state.status}), starting auto-reconnect")
                         startAutoReconnect(state.wsUrl, state.clientId, state.clientName)
                     }
 
@@ -806,6 +806,23 @@ class SendspinService : Service() {
         }
     }
 
+    /**
+     * True when the client lost its server connection and should retry without user action.
+     * Excludes intentional teardown (user disconnect, resource cleanup).
+     */
+    private fun shouldAutoReconnect(status: String): Boolean {
+        if (status == "disconnected" || status == "network_lost") {
+            return false
+        }
+        if (status.startsWith("failure:")) {
+            return true
+        }
+        if (!status.startsWith("closed:")) {
+            return false
+        }
+        return status != "closed:user_disconnect" && status != "closed:resource_cleanup"
+    }
+
     private fun startAutoReconnect(
         wsUrl: String,
         clientId: String,
@@ -837,7 +854,7 @@ class SendspinService : Service() {
                     delay(delayMs)
 
                     // Check if we still want to reconnect (haven't been manually disconnected)
-                    if (_uiState.value.status.startsWith("failure:") || _uiState.value.status.startsWith("closed:")) {
+                    if (shouldAutoReconnect(_uiState.value.status)) {
                         Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
                         connect(wsUrl, clientId, clientName, fromBoot = false)
                     } else {
@@ -1037,7 +1054,14 @@ class SendspinService : Service() {
     }
 
     private fun reconnectFromSavedCredentialsIfIdle() {
-        if (client != null) return
+        val existing = client
+        if (existing != null) {
+            if (existing.diagnostics.value.connected) {
+                return
+            }
+            Log.i(tag, "Stale disconnected client on service restart — cleaning up before reconnect")
+            disconnect(keepForeground = true)
+        }
 
         val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
         val wsUrl = prefs.getString("ws_url", null)?.takeIf { it.isNotBlank() } ?: return

@@ -314,6 +314,13 @@ class SendspinNativeClient(
 
     fun isHealthy(): Boolean {
         if (!started.get()) return true
+        val diag = _diagnostics.value
+        if (
+            !diag.connected &&
+                (diag.status.startsWith("closed:") || diag.status.startsWith("failure:"))
+        ) {
+            return false
+        }
         val elapsed = System.currentTimeMillis() - lastDiagnosticsUpdateMs
         return elapsed < 10000L
     }
