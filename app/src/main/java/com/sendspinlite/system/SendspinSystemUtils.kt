@@ -22,7 +22,7 @@ object SendspinSystemUtils {
                 context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             val memInfo = ActivityManager.MemoryInfo()
             activityManager?.getMemoryInfo(memInfo)
-            val lowMemory = memInfo?.totalMem ?: 0L < 2_000_000_000L
+            val lowMemory = memInfo?.totalMem ?: 0L < 1_250_000_000L
             if (lowMemory) {
                 Log.i(tag, "Low-memory device detected (${memInfo?.totalMem ?: 0L} bytes RAM)")
             }
