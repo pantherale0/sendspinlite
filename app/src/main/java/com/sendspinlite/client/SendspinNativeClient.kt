@@ -470,6 +470,15 @@ class SendspinNativeClient(
         if (lastStreamSampleRate <= 0) return
         if (output.isStarted()) return
 
+        val diag = _diagnostics.value
+        if (diag.playbackState != "playing" || !diag.connected) return
+
+        // Prevent race conditions during the initial stream start/AudioTrack initialization phase
+        val now = System.currentTimeMillis()
+        if (now - lastSuccessfulAudioWriteMs < 1000L) {
+            return
+        }
+
         Log.w(
             tag,
             "AudioTrack not started during playback; recreating sr=$lastStreamSampleRate " +

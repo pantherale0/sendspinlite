@@ -842,11 +842,11 @@ class SendspinService : Service() {
         }
     }
 
-    fun disconnect(keepForeground: Boolean = false) {
+    fun disconnect(reason: String = "user_disconnect", keepForeground: Boolean = false) {
         try {
-            client?.close("user_disconnect")
+            client?.close(reason)
         } catch (e: Exception) {
-            Log.e(tag, "Error closing client", e)
+            Log.e(tag, "Error closing client with reason $reason", e)
         }
 
         try {
@@ -1130,7 +1130,7 @@ class SendspinService : Service() {
 
         scope.launch {
             try {
-                client?.close("playback_starvation")
+                disconnect("playback_starvation", keepForeground = true)
                 delay(400)
                 val fresh = _uiState.value
                 if (fresh.wsUrl.isNotBlank() && fresh.clientId.isNotBlank()) {
@@ -1483,7 +1483,7 @@ class SendspinService : Service() {
         scope.launch {
             try {
                 Log.i(tag, "Starting service recovery...")
-                client?.close("health_recovery")
+                disconnect("health_recovery", keepForeground = true)
                 delay(1000)
 
                 val wsUrl = _uiState.value.wsUrl
