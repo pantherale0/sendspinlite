@@ -94,6 +94,7 @@ class SendspinService : Service() {
     // Reconnection retry tracking
     private var reconnectJob: Job? = null
     private var reconnectRetryCount = 0
+
     // Unlimited reconnection attempts - will keep retrying until manually disconnected
     private var connectingStartedAtMs: Long = 0L
     private var connectWatchdogJob: Job? = null
@@ -678,22 +679,7 @@ class SendspinService : Service() {
     ) {
         ensureAuxiliaryStarted()
 
-        // Don't create a new connection if we're already connected or actively connecting
-        // to the same server. Stale "connecting" after a timed-out attempt must not block recovery.
-        if (!fromAutoReconnect &&
-            client != null &&
-            _uiState.value.wsUrl == wsUrl &&
-            _uiState.value.clientId == clientId &&
-            (
-                _uiState.value.connected ||
-                    ReconnectPolicy.isActivelyConnecting(
-                        status = _uiState.value.status,
-                        connected = _uiState.value.connected,
-                        connectingStartedAtMs = connectingStartedAtMs,
-                        nowMs = System.currentTimeMillis(),
-                    )
-            )
-        ) {
+        if (!fromAutoReconnect && shouldIgnoreDuplicateConnect(wsUrl, clientId)) {
             Log.i(tag, "Already connected/connecting to this server, ignoring duplicate connect request")
             return
         }
@@ -708,7 +694,34 @@ class SendspinService : Service() {
         }
 
         disconnect(keepForeground = true, cancelReconnect = !fromAutoReconnect)
+        beginClientConnection(wsUrl, clientId, clientName, fromBoot)
+    }
 
+    private fun shouldIgnoreDuplicateConnect(
+        wsUrl: String,
+        clientId: String,
+    ): Boolean {
+        val state = _uiState.value
+        if (client == null || state.wsUrl != wsUrl || state.clientId != clientId) {
+            return false
+        }
+        if (state.connected) {
+            return true
+        }
+        return ReconnectPolicy.isActivelyConnecting(
+            status = state.status,
+            connected = state.connected,
+            connectingStartedAtMs = connectingStartedAtMs,
+            nowMs = System.currentTimeMillis(),
+        )
+    }
+
+    private fun beginClientConnection(
+        wsUrl: String,
+        clientId: String,
+        clientName: String,
+        fromBoot: Boolean,
+    ) {
         // Acquire wifi lock when connecting
         wifiLock?.acquire()
 
@@ -751,6 +764,16 @@ class SendspinService : Service() {
         activeClient.setPlayerVolume(_uiState.value.playerVolume)
         activeClient.setPlayerMute(_uiState.value.playerMuted)
 
+        attachClientCollectors(activeClient)
+        startHealthMonitoring()
+
+        scope.launch {
+            client?.connect()
+        }
+        startConnectWatchdog(activeClient)
+    }
+
+    private fun attachClientCollectors(activeClient: SendspinNativeClient) {
         // Listen to client diagnostics Flow.
         // Cancel any previous collector first so a reconnect cannot leak the prior client.
         diagnosticsJob?.cancel()
@@ -771,61 +794,56 @@ class SendspinService : Service() {
                 activeClient.events
                     .takeWhile { client === activeClient }
                     .collect { event ->
-                        when (event) {
-                            is ClientEvent.ServerVolumeChanged -> {
-                                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-                                val systemVolume = (event.volume * maxVolume / 100)
-                                audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, systemVolume, 0)
-                                Log.i(tag, "Applied server volume command: ${event.volume}% (systemVolume=$systemVolume)")
-                                markServerVolumeSet()
-
-                                // Sync volume to ViewModel via _uiState immediately
-                                _uiState.value =
-                                    _uiState.value.copy(
-                                        playerVolume = event.volume,
-                                        playerVolumeFromServer = false,
-                                    )
-                            }
-                            is ClientEvent.ServerMutedChanged -> {
-                                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                                if (event.muted) {
-                                    audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
-                                    Log.i(tag, "Applied server mute command: muted=true")
-                                }
-                                markServerVolumeSet()
-
-                                _uiState.value =
-                                    _uiState.value.copy(
-                                        playerMuted = event.muted,
-                                        playerMutedFromServer = false,
-                                    )
-                            }
-                            is ClientEvent.ServerStaticDelayChanged -> {
-                                val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
-                                prefs.edit().putLong("static_delay_ms", event.delayMs).apply()
-                                Log.i(tag, "Persisted server-commanded static delay: ${event.delayMs}ms")
-
-                                _uiState.value =
-                                    _uiState.value.copy(
-                                        staticDelayMs = event.delayMs,
-                                        staticDelayMsFromServer = false,
-                                    )
-                            }
-                            is ClientEvent.PlaybackStarvation -> {
-                                handlePlaybackStarvation(event)
-                            }
-                        }
+                        handleClientEvent(event)
                     }
             }
+    }
 
-        // Start health monitoring when connecting
-        startHealthMonitoring()
+    private fun handleClientEvent(event: ClientEvent) {
+        when (event) {
+            is ClientEvent.ServerVolumeChanged -> {
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                val systemVolume = (event.volume * maxVolume / 100)
+                audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, systemVolume, 0)
+                Log.i(tag, "Applied server volume command: ${event.volume}% (systemVolume=$systemVolume)")
+                markServerVolumeSet()
 
-        scope.launch {
-            client?.connect()
+                _uiState.value =
+                    _uiState.value.copy(
+                        playerVolume = event.volume,
+                        playerVolumeFromServer = false,
+                    )
+            }
+            is ClientEvent.ServerMutedChanged -> {
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                if (event.muted) {
+                    audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
+                    Log.i(tag, "Applied server mute command: muted=true")
+                }
+                markServerVolumeSet()
+
+                _uiState.value =
+                    _uiState.value.copy(
+                        playerMuted = event.muted,
+                        playerMutedFromServer = false,
+                    )
+            }
+            is ClientEvent.ServerStaticDelayChanged -> {
+                val prefs = getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
+                prefs.edit().putLong("static_delay_ms", event.delayMs).apply()
+                Log.i(tag, "Persisted server-commanded static delay: ${event.delayMs}ms")
+
+                _uiState.value =
+                    _uiState.value.copy(
+                        staticDelayMs = event.delayMs,
+                        staticDelayMsFromServer = false,
+                    )
+            }
+            is ClientEvent.PlaybackStarvation -> {
+                handlePlaybackStarvation(event)
+            }
         }
-        startConnectWatchdog(activeClient)
     }
 
     /**
@@ -840,7 +858,7 @@ class SendspinService : Service() {
                 delay(ReconnectPolicy.CONNECT_TIMEOUT_MS)
                 if (client !== activeClient) return@launch
                 val state = _uiState.value
-                if (state.connected && (state.status == "ws_open" || state.status == "open")) {
+                if (ReconnectPolicy.isConnectedOpen(state.status, state.connected)) {
                     return@launch
                 }
                 if (!state.status.startsWith("connecting") && !state.status.startsWith("failure:")) {
@@ -966,7 +984,8 @@ class SendspinService : Service() {
 
         reconnectJob =
             scope.launch {
-                while (isActive) {
+                var keepTrying = true
+                while (isActive && keepTrying) {
                     val currentStatus = _uiState.value.status
                     val delayMs = ReconnectPolicy.reconnectDelayMs(currentStatus, reconnectRetryCount)
 
@@ -978,53 +997,73 @@ class SendspinService : Service() {
                     val beforeAttempt = _uiState.value
                     if (!ReconnectPolicy.shouldContinueReconnectLoop(beforeAttempt.status, beforeAttempt.connected)) {
                         Log.i(tag, "Stopping auto-reconnect (status=${beforeAttempt.status})")
-                        break
-                    }
-
-                    Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
-                    connect(
-                        wsUrl = wsUrl,
-                        clientId = clientId,
-                        clientName = clientName,
-                        fromBoot = false,
-                        fromAutoReconnect = true,
-                    )
-
-                    val outcome = awaitReconnectAttemptOutcome()
-                    when (outcome) {
-                        ReconnectAttemptOutcome.CONNECTED -> {
-                            Log.i(tag, "Auto-reconnect succeeded on attempt $reconnectRetryCount")
-                            break
-                        }
-                        ReconnectAttemptOutcome.STOPPED -> {
-                            Log.i(tag, "Auto-reconnect stopped (user disconnect or terminal status)")
-                            break
-                        }
-                        ReconnectAttemptOutcome.FAILED -> {
-                            Log.w(tag, "Auto-reconnect attempt $reconnectRetryCount failed; will retry")
-                            // Tear down the failed client so the next attempt starts clean, without
-                            // cancelling this reconnect loop.
-                            if (client != null && !_uiState.value.connected) {
-                                disconnect(
-                                    reason = "connect_timeout",
-                                    keepForeground = true,
-                                    cancelReconnect = false,
-                                )
-                                _uiState.value =
-                                    _uiState.value.copy(
-                                        wsUrl = wsUrl,
-                                        clientId = clientId,
-                                        clientName = clientName,
-                                        connected = false,
-                                        status = ReconnectPolicy.FAILURE_CONNECT_TIMEOUT,
-                                    )
-                            }
-                        }
+                        keepTrying = false
+                    } else {
+                        Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
+                        connect(
+                            wsUrl = wsUrl,
+                            clientId = clientId,
+                            clientName = clientName,
+                            fromBoot = false,
+                            fromAutoReconnect = true,
+                        )
+                        keepTrying =
+                            handleReconnectAttemptOutcome(
+                                awaitReconnectAttemptOutcome(),
+                                wsUrl,
+                                clientId,
+                                clientName,
+                            )
                     }
                 }
 
                 reconnectJob = null
             }
+    }
+
+    private fun handleReconnectAttemptOutcome(
+        outcome: ReconnectAttemptOutcome,
+        wsUrl: String,
+        clientId: String,
+        clientName: String,
+    ): Boolean =
+        when (outcome) {
+            ReconnectAttemptOutcome.CONNECTED -> {
+                Log.i(tag, "Auto-reconnect succeeded on attempt $reconnectRetryCount")
+                false
+            }
+            ReconnectAttemptOutcome.STOPPED -> {
+                Log.i(tag, "Auto-reconnect stopped (user disconnect or terminal status)")
+                false
+            }
+            ReconnectAttemptOutcome.FAILED -> {
+                Log.w(tag, "Auto-reconnect attempt $reconnectRetryCount failed; will retry")
+                markFailedReconnectAttempt(wsUrl, clientId, clientName)
+                true
+            }
+        }
+
+    private fun markFailedReconnectAttempt(
+        wsUrl: String,
+        clientId: String,
+        clientName: String,
+    ) {
+        // Tear down the failed client so the next attempt starts clean, without
+        // cancelling this reconnect loop.
+        if (client == null || _uiState.value.connected) return
+        disconnect(
+            reason = "connect_timeout",
+            keepForeground = true,
+            cancelReconnect = false,
+        )
+        _uiState.value =
+            _uiState.value.copy(
+                wsUrl = wsUrl,
+                clientId = clientId,
+                clientName = clientName,
+                connected = false,
+                status = ReconnectPolicy.FAILURE_CONNECT_TIMEOUT,
+            )
     }
 
     private enum class ReconnectAttemptOutcome {
@@ -1038,44 +1077,42 @@ class SendspinService : Service() {
      */
     private suspend fun awaitReconnectAttemptOutcome(): ReconnectAttemptOutcome {
         val deadline = System.currentTimeMillis() + ReconnectPolicy.CONNECT_TIMEOUT_MS
-        while (isActive) {
+        var outcome: ReconnectAttemptOutcome? = null
+        while (outcome == null && currentCoroutineContext().isActive) {
             val state = _uiState.value
-            if (state.connected && (state.status == "ws_open" || state.status == "open")) {
-                return ReconnectAttemptOutcome.CONNECTED
-            }
-            if (state.status == "disconnected" ||
-                state.status == "closed:user_disconnect" ||
-                state.status == "closed:resource_cleanup"
-            ) {
-                return ReconnectAttemptOutcome.STOPPED
-            }
-            if (state.status.startsWith("failure:") ||
-                (
-                    state.status.startsWith("closed:") &&
-                        ReconnectPolicy.shouldAutoReconnect(state.status)
-                )
-            ) {
-                return ReconnectAttemptOutcome.FAILED
-            }
-            if (System.currentTimeMillis() >= deadline) {
-                // Watchdog may not have fired yet if clocks skew; force a failure outcome.
-                if (!_uiState.value.connected) {
-                    client?.markConnectFailed("connect_timeout")
-                    _uiState.value =
-                        _uiState.value.copy(
-                            connected = false,
-                            status = ReconnectPolicy.FAILURE_CONNECT_TIMEOUT,
-                        )
+            outcome =
+                when {
+                    ReconnectPolicy.isConnectedOpen(state.status, state.connected) ->
+                        ReconnectAttemptOutcome.CONNECTED
+                    ReconnectPolicy.isTerminalDisconnect(state.status) ->
+                        ReconnectAttemptOutcome.STOPPED
+                    ReconnectPolicy.isReconnectFailureStatus(state.status) ->
+                        ReconnectAttemptOutcome.FAILED
+                    System.currentTimeMillis() >= deadline ->
+                        timeoutReconnectAttempt(state.status)
+                    else -> null
                 }
-                return if (_uiState.value.connected) {
-                    ReconnectAttemptOutcome.CONNECTED
-                } else {
-                    ReconnectAttemptOutcome.FAILED
-                }
+            if (outcome == null) {
+                delay(ReconnectPolicy.RECONNECT_POLL_MS)
             }
-            delay(250)
         }
-        return ReconnectAttemptOutcome.STOPPED
+        return outcome ?: ReconnectAttemptOutcome.STOPPED
+    }
+
+    private fun timeoutReconnectAttempt(status: String): ReconnectAttemptOutcome {
+        val latest = _uiState.value
+        if (ReconnectPolicy.isConnectedOpen(latest.status, latest.connected)) {
+            return ReconnectAttemptOutcome.CONNECTED
+        }
+        // Optimistic connected=true during "connecting..." must not count as success.
+        Log.w(tag, "Reconnect attempt timed out (status=$status)")
+        client?.markConnectFailed("connect_timeout")
+        _uiState.value =
+            _uiState.value.copy(
+                connected = false,
+                status = ReconnectPolicy.FAILURE_CONNECT_TIMEOUT,
+            )
+        return ReconnectAttemptOutcome.FAILED
     }
 
     fun setStaticDelayMs(ms: Long) {
@@ -1413,7 +1450,7 @@ class SendspinService : Service() {
                 mirrorServiceEssentials(previousState, diag)
             }
 
-        if (diag.connected && (diag.status == "ws_open" || diag.status == "open")) {
+        if (ReconnectPolicy.isConnectedOpen(diag.status, diag.connected)) {
             connectingStartedAtMs = 0L
             connectWatchdogJob?.cancel()
             connectWatchdogJob = null
@@ -1604,9 +1641,8 @@ class SendspinService : Service() {
 
     private fun isServiceHealthy(): Boolean {
         // Auto-reconnect owns recovery while it is running; health recovery would cancel the loop.
-        if (reconnectJob != null) return true
-        val client = this.client ?: return false
-        return client.isHealthy()
+        val activeClient = if (reconnectJob != null) null else client
+        return activeClient?.isHealthy() ?: (reconnectJob != null)
     }
 
     private fun recoverService() {

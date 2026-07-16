@@ -14,24 +14,24 @@ object ReconnectPolicy {
     /** Longer pause when the server port looks closed (typical during upgrades). */
     const val PORT_CLOSED_DELAY_MS = 30_000L
 
+    /** Poll interval while waiting for a reconnect attempt to succeed or fail. */
+    const val RECONNECT_POLL_MS = 250L
+
+    private const val BASE_BACKOFF_MS = 1_000L
+
     const val FAILURE_CONNECT_TIMEOUT = "failure:connect_timeout"
 
     /**
      * True when the client lost its server connection and should retry without user action.
      * Excludes intentional teardown (user disconnect, resource cleanup).
      */
-    fun shouldAutoReconnect(status: String): Boolean {
-        if (status == "disconnected" || status == "network_lost") {
-            return false
+    fun shouldAutoReconnect(status: String): Boolean =
+        when {
+            status == "disconnected" || status == "network_lost" -> false
+            status.startsWith("failure:") -> true
+            !status.startsWith("closed:") -> false
+            else -> status != "closed:user_disconnect" && status != "closed:resource_cleanup"
         }
-        if (status.startsWith("failure:")) {
-            return true
-        }
-        if (!status.startsWith("closed:")) {
-            return false
-        }
-        return status != "closed:user_disconnect" && status != "closed:resource_cleanup"
-    }
 
     /**
      * True while an in-flight connect should suppress duplicate connect() calls.
@@ -42,12 +42,13 @@ object ReconnectPolicy {
         connected: Boolean,
         connectingStartedAtMs: Long,
         nowMs: Long,
-    ): Boolean {
-        if (connected) return false
-        if (!status.startsWith("connecting")) return false
-        if (connectingStartedAtMs <= 0L) return true
-        return nowMs - connectingStartedAtMs < CONNECT_TIMEOUT_MS
-    }
+    ): Boolean =
+        when {
+            connected -> false
+            !status.startsWith("connecting") -> false
+            connectingStartedAtMs <= 0L -> true
+            else -> nowMs - connectingStartedAtMs < CONNECT_TIMEOUT_MS
+        }
 
     /**
      * Whether the auto-reconnect loop should keep retrying after observing [status]/[connected].
@@ -55,20 +56,15 @@ object ReconnectPolicy {
     fun shouldContinueReconnectLoop(
         status: String,
         connected: Boolean,
-    ): Boolean {
-        if (connected && (status == "ws_open" || status == "open")) {
-            return false
+    ): Boolean =
+        when {
+            connected && (status == "ws_open" || status == "open") -> false
+            status == "disconnected" -> false
+            status == "closed:user_disconnect" || status == "closed:resource_cleanup" -> false
+            // Keep going through connecting / failure / closed / network_lost so a server
+            // restart that outlives the first attempt still recovers without force-closing the app.
+            else -> true
         }
-        if (status == "disconnected") {
-            return false
-        }
-        if (status == "closed:user_disconnect" || status == "closed:resource_cleanup") {
-            return false
-        }
-        // Keep going through connecting / failure / closed / network_lost so a server
-        // restart that outlives the first attempt still recovers without force-closing the app.
-        return true
-    }
 
     fun reconnectDelayMs(
         status: String,
@@ -78,6 +74,20 @@ object ReconnectPolicy {
             return PORT_CLOSED_DELAY_MS
         }
         val exponent = retryCount.coerceAtLeast(0)
-        return (1000L * Math.pow(2.0, exponent.toDouble())).toLong().coerceAtMost(MAX_BACKOFF_MS)
+        return (BASE_BACKOFF_MS * Math.pow(2.0, exponent.toDouble())).toLong().coerceAtMost(MAX_BACKOFF_MS)
     }
+
+    fun isConnectedOpen(
+        status: String,
+        connected: Boolean,
+    ): Boolean = connected && (status == "ws_open" || status == "open")
+
+    fun isTerminalDisconnect(status: String): Boolean =
+        status == "disconnected" ||
+            status == "closed:user_disconnect" ||
+            status == "closed:resource_cleanup"
+
+    fun isReconnectFailureStatus(status: String): Boolean =
+        status.startsWith("failure:") ||
+            (status.startsWith("closed:") && shouldAutoReconnect(status))
 }
