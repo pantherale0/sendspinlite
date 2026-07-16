@@ -210,6 +210,27 @@ class SendspinNativeClient(
         }
     }
 
+    /**
+     * Marks a connect attempt that never reached `ws_open` as failed so service-level
+     * auto-reconnect can keep retrying (native only emits closed: on a connected→lost edge).
+     */
+    fun markConnectFailed(reason: String) {
+        if (_diagnostics.value.connected) return
+        val current = status
+        if (current == "ws_open" || current == "open") return
+        status = "failure:$reason"
+        firstTimeSyncedAtMs = 0L
+        updateDiagnostics {
+            it.copy(
+                status = status,
+                connected = false,
+                activeRoles = "",
+                networkQuality = "UNKNOWN",
+                stability = "UNSTABLE",
+            )
+        }
+    }
+
     fun cleanupResources() {
         started.set(false)
         feedbackJob?.cancel()

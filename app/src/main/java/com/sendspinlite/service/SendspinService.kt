@@ -32,6 +32,7 @@ import com.sendspinlite.client.ClientDiagnostics
 import com.sendspinlite.client.ClientEvent
 import com.sendspinlite.client.SendspinNativeClient
 import com.sendspinlite.diagnostics.DiagnosticsDelta
+import com.sendspinlite.network.ReconnectPolicy
 import com.sendspinlite.system.AppMemoryPolicy
 import com.sendspinlite.ui.MainActivity
 import com.sendspinlite.ui.PlayerViewModel
@@ -94,6 +95,8 @@ class SendspinService : Service() {
     private var reconnectJob: Job? = null
     private var reconnectRetryCount = 0
     // Unlimited reconnection attempts - will keep retrying until manually disconnected
+    private var connectingStartedAtMs: Long = 0L
+    private var connectWatchdogJob: Job? = null
 
     // Per-connection flow collectors. These MUST be cancelled on every disconnect/reconnect,
     // otherwise each connect() leaks two coroutines that keep the previous SendspinNativeClient
@@ -331,7 +334,7 @@ class SendspinService : Service() {
                             }
                         }
 
-                        if (shouldAutoReconnect(state.status) && reconnectJob == null) {
+                        if (ReconnectPolicy.shouldAutoReconnect(state.status) && reconnectJob == null) {
                             Log.i(tag, "Connection lost (${state.status}), starting auto-reconnect")
                             startAutoReconnect(state.wsUrl, state.clientId, state.clientName)
                         }
@@ -671,26 +674,40 @@ class SendspinService : Service() {
         clientId: String,
         clientName: String,
         fromBoot: Boolean = false,
+        fromAutoReconnect: Boolean = false,
     ) {
         ensureAuxiliaryStarted()
 
-        // Don't create a new connection if we're already connected or connecting to the same server
-        if (client != null &&
+        // Don't create a new connection if we're already connected or actively connecting
+        // to the same server. Stale "connecting" after a timed-out attempt must not block recovery.
+        if (!fromAutoReconnect &&
+            client != null &&
             _uiState.value.wsUrl == wsUrl &&
             _uiState.value.clientId == clientId &&
-            (_uiState.value.connected || _uiState.value.status.startsWith("connecting"))
+            (
+                _uiState.value.connected ||
+                    ReconnectPolicy.isActivelyConnecting(
+                        status = _uiState.value.status,
+                        connected = _uiState.value.connected,
+                        connectingStartedAtMs = connectingStartedAtMs,
+                        nowMs = System.currentTimeMillis(),
+                    )
+            )
         ) {
             Log.i(tag, "Already connected/connecting to this server, ignoring duplicate connect request")
             return
         }
 
-        // Reset reconnect retry counter when user explicitly calls connect()
-        // This allows recovery after hitting the max retry limit
-        reconnectRetryCount = 0
-        reconnectJob?.cancel()
-        reconnectJob = null
+        // Explicit user/UI connect cancels any in-flight auto-reconnect loop.
+        // Auto-reconnect attempts must preserve the loop or a server restart that lasts
+        // longer than the first attempt leaves the app stuck until force-close.
+        if (!fromAutoReconnect) {
+            reconnectRetryCount = 0
+            reconnectJob?.cancel()
+            reconnectJob = null
+        }
 
-        disconnect(keepForeground = true)
+        disconnect(keepForeground = true, cancelReconnect = !fromAutoReconnect)
 
         // Acquire wifi lock when connecting
         wifiLock?.acquire()
@@ -699,6 +716,7 @@ class SendspinService : Service() {
         // Use startedFromBoot flag to track if service was initially started from boot context
         startForegroundWithRetry(fromBoot = startedFromBoot || fromBoot)
 
+        connectingStartedAtMs = System.currentTimeMillis()
         _uiState.value =
             _uiState.value.copy(
                 wsUrl = wsUrl,
@@ -807,6 +825,38 @@ class SendspinService : Service() {
         scope.launch {
             client?.connect()
         }
+        startConnectWatchdog(activeClient)
+    }
+
+    /**
+     * If a connect attempt never reaches ws_open (common while a Sendspin server is restarting),
+     * native code never emits a closed:/failure: edge. Surface a failure so auto-reconnect
+     * can keep retrying instead of wedging on "connecting".
+     */
+    private fun startConnectWatchdog(activeClient: SendspinNativeClient) {
+        connectWatchdogJob?.cancel()
+        connectWatchdogJob =
+            scope.launch {
+                delay(ReconnectPolicy.CONNECT_TIMEOUT_MS)
+                if (client !== activeClient) return@launch
+                val state = _uiState.value
+                if (state.connected && (state.status == "ws_open" || state.status == "open")) {
+                    return@launch
+                }
+                if (!state.status.startsWith("connecting") && !state.status.startsWith("failure:")) {
+                    // Already closed/disconnected by another path.
+                    if (!ReconnectPolicy.shouldAutoReconnect(state.status)) return@launch
+                }
+                Log.w(tag, "Connect timed out (status=${state.status}); marking failure for reconnect")
+                activeClient.markConnectFailed("connect_timeout")
+                if (client === activeClient) {
+                    _uiState.value =
+                        _uiState.value.copy(
+                            connected = false,
+                            status = ReconnectPolicy.FAILURE_CONNECT_TIMEOUT,
+                        )
+                }
+            }
     }
 
     private fun startForegroundWithRetry(
@@ -842,7 +892,15 @@ class SendspinService : Service() {
         }
     }
 
-    fun disconnect(reason: String = "user_disconnect", keepForeground: Boolean = false) {
+    fun disconnect(
+        reason: String = "user_disconnect",
+        keepForeground: Boolean = false,
+        cancelReconnect: Boolean = true,
+    ) {
+        connectWatchdogJob?.cancel()
+        connectWatchdogJob = null
+        connectingStartedAtMs = 0L
+
         try {
             client?.close(reason)
         } catch (e: Exception) {
@@ -868,10 +926,12 @@ class SendspinService : Service() {
         // Stop health monitoring when disconnecting
         stopHealthMonitoring()
 
-        // Cancel any pending reconnect attempts
-        reconnectJob?.cancel()
-        reconnectJob = null
-        reconnectRetryCount = 0
+        // Cancel any pending reconnect attempts (skipped when tearing down for an auto-reconnect attempt)
+        if (cancelReconnect) {
+            reconnectJob?.cancel()
+            reconnectJob = null
+            reconnectRetryCount = 0
+        }
 
         // Release wake lock and wifi lock when disconnecting
         if (!keepForeground) {
@@ -895,23 +955,6 @@ class SendspinService : Service() {
         }
     }
 
-    /**
-     * True when the client lost its server connection and should retry without user action.
-     * Excludes intentional teardown (user disconnect, resource cleanup).
-     */
-    private fun shouldAutoReconnect(status: String): Boolean {
-        if (status == "disconnected" || status == "network_lost") {
-            return false
-        }
-        if (status.startsWith("failure:")) {
-            return true
-        }
-        if (!status.startsWith("closed:")) {
-            return false
-        }
-        return status != "closed:user_disconnect" && status != "closed:resource_cleanup"
-    }
-
     private fun startAutoReconnect(
         wsUrl: String,
         clientId: String,
@@ -925,35 +968,114 @@ class SendspinService : Service() {
             scope.launch {
                 while (isActive) {
                     val currentStatus = _uiState.value.status
-
-                    // If port is closed, assume server is being upgraded - use longer wait
-                    val delayMs =
-                        if (currentStatus.contains("port_closed")) {
-                            // Server likely upgrading - wait 30 seconds between attempts
-                            Log.i(tag, "Port closed (server upgrading?), using extended retry delay")
-                            30_000L
-                        } else {
-                            // Normal exponential backoff for other failures
-                            (1000L * Math.pow(2.0, reconnectRetryCount.toDouble())).toLong().coerceAtMost(60000L)
-                        }
+                    val delayMs = ReconnectPolicy.reconnectDelayMs(currentStatus, reconnectRetryCount)
 
                     reconnectRetryCount++
                     Log.i(tag, "Reconnect attempt $reconnectRetryCount, waiting ${delayMs}ms")
 
                     delay(delayMs)
 
-                    // Check if we still want to reconnect (haven't been manually disconnected)
-                    if (shouldAutoReconnect(_uiState.value.status)) {
-                        Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
-                        connect(wsUrl, clientId, clientName, fromBoot = false)
-                    } else {
-                        // Connection was restored or user disconnected, stop retrying
+                    val beforeAttempt = _uiState.value
+                    if (!ReconnectPolicy.shouldContinueReconnectLoop(beforeAttempt.status, beforeAttempt.connected)) {
+                        Log.i(tag, "Stopping auto-reconnect (status=${beforeAttempt.status})")
                         break
+                    }
+
+                    Log.i(tag, "Attempting auto-reconnect (attempt $reconnectRetryCount)")
+                    connect(
+                        wsUrl = wsUrl,
+                        clientId = clientId,
+                        clientName = clientName,
+                        fromBoot = false,
+                        fromAutoReconnect = true,
+                    )
+
+                    val outcome = awaitReconnectAttemptOutcome()
+                    when (outcome) {
+                        ReconnectAttemptOutcome.CONNECTED -> {
+                            Log.i(tag, "Auto-reconnect succeeded on attempt $reconnectRetryCount")
+                            break
+                        }
+                        ReconnectAttemptOutcome.STOPPED -> {
+                            Log.i(tag, "Auto-reconnect stopped (user disconnect or terminal status)")
+                            break
+                        }
+                        ReconnectAttemptOutcome.FAILED -> {
+                            Log.w(tag, "Auto-reconnect attempt $reconnectRetryCount failed; will retry")
+                            // Tear down the failed client so the next attempt starts clean, without
+                            // cancelling this reconnect loop.
+                            if (client != null && !_uiState.value.connected) {
+                                disconnect(
+                                    reason = "connect_timeout",
+                                    keepForeground = true,
+                                    cancelReconnect = false,
+                                )
+                                _uiState.value =
+                                    _uiState.value.copy(
+                                        wsUrl = wsUrl,
+                                        clientId = clientId,
+                                        clientName = clientName,
+                                        connected = false,
+                                        status = ReconnectPolicy.FAILURE_CONNECT_TIMEOUT,
+                                    )
+                            }
+                        }
                     }
                 }
 
                 reconnectJob = null
             }
+    }
+
+    private enum class ReconnectAttemptOutcome {
+        CONNECTED,
+        FAILED,
+        STOPPED,
+    }
+
+    /**
+     * Waits until the in-flight connect reaches ws_open, fails/times out, or the user disconnects.
+     */
+    private suspend fun awaitReconnectAttemptOutcome(): ReconnectAttemptOutcome {
+        val deadline = System.currentTimeMillis() + ReconnectPolicy.CONNECT_TIMEOUT_MS
+        while (isActive) {
+            val state = _uiState.value
+            if (state.connected && (state.status == "ws_open" || state.status == "open")) {
+                return ReconnectAttemptOutcome.CONNECTED
+            }
+            if (state.status == "disconnected" ||
+                state.status == "closed:user_disconnect" ||
+                state.status == "closed:resource_cleanup"
+            ) {
+                return ReconnectAttemptOutcome.STOPPED
+            }
+            if (state.status.startsWith("failure:") ||
+                (
+                    state.status.startsWith("closed:") &&
+                        ReconnectPolicy.shouldAutoReconnect(state.status)
+                )
+            ) {
+                return ReconnectAttemptOutcome.FAILED
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                // Watchdog may not have fired yet if clocks skew; force a failure outcome.
+                if (!_uiState.value.connected) {
+                    client?.markConnectFailed("connect_timeout")
+                    _uiState.value =
+                        _uiState.value.copy(
+                            connected = false,
+                            status = ReconnectPolicy.FAILURE_CONNECT_TIMEOUT,
+                        )
+                }
+                return if (_uiState.value.connected) {
+                    ReconnectAttemptOutcome.CONNECTED
+                } else {
+                    ReconnectAttemptOutcome.FAILED
+                }
+            }
+            delay(250)
+        }
+        return ReconnectAttemptOutcome.STOPPED
     }
 
     fun setStaticDelayMs(ms: Long) {
@@ -1291,6 +1413,12 @@ class SendspinService : Service() {
                 mirrorServiceEssentials(previousState, diag)
             }
 
+        if (diag.connected && (diag.status == "ws_open" || diag.status == "open")) {
+            connectingStartedAtMs = 0L
+            connectWatchdogJob?.cancel()
+            connectWatchdogJob = null
+        }
+
         val tracked = trackConnectionDrops(previousState, newState)
         if (tracked == previousState) {
             return
@@ -1475,6 +1603,8 @@ class SendspinService : Service() {
     }
 
     private fun isServiceHealthy(): Boolean {
+        // Auto-reconnect owns recovery while it is running; health recovery would cancel the loop.
+        if (reconnectJob != null) return true
         val client = this.client ?: return false
         return client.isHealthy()
     }
