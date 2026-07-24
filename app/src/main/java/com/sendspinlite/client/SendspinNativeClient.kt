@@ -111,6 +111,9 @@ class SendspinNativeClient(
 
     private val starvationReported = AtomicBoolean(false)
 
+    /** True after at least one successful PCM write for the current stream. */
+    private val receivedAudioThisStream = AtomicBoolean(false)
+
     private var feedbackJob: Job? = null
     private var diagnosticsJob: Job? = null
     private var healthJob: Job? = null
@@ -171,6 +174,7 @@ class SendspinNativeClient(
 
         started.set(true)
         starvationReported.set(false)
+        receivedAudioThisStream.set(false)
         lastSuccessfulAudioWriteMs = System.currentTimeMillis()
         startFeedbackLoop()
         startDiagnosticsLoop()
@@ -464,6 +468,7 @@ class SendspinNativeClient(
                 msSinceLastWrite = msSinceWrite,
                 outputQueueMs = outputQueueMs,
                 linkDegraded = linkDegraded,
+                receivedAudioThisStream = receivedAudioThisStream.get(),
             )
         ) {
             if (starvationReported.compareAndSet(false, true)) {
@@ -490,6 +495,8 @@ class SendspinNativeClient(
     private fun maybeRecoverAudioTrack() {
         if (lastStreamSampleRate <= 0) return
         if (output.isStarted()) return
+        // Starvation reconnect owns recovery; recreating the track here races disconnect.
+        if (starvationReported.get()) return
 
         val diag = _diagnostics.value
         if (diag.playbackState != "playing" || !diag.connected) return
@@ -616,6 +623,7 @@ class SendspinNativeClient(
         val written = output.writePcm(buffer, length, timeoutMs)
         if (written > 0) {
             lastSuccessfulAudioWriteMs = System.currentTimeMillis()
+            receivedAudioThisStream.set(true)
             linkDegraded = false
             starvationReported.set(false)
         }
@@ -632,6 +640,7 @@ class SendspinNativeClient(
         lastStreamChannels = channels
         lastStreamBitDepth = bitDepth
         lastSuccessfulAudioWriteMs = System.currentTimeMillis()
+        receivedAudioThisStream.set(false)
         starvationReported.set(false)
         output.start(sampleRate, channels, bitDepth)
         output.syncPlaybackFeedbackBaseline()

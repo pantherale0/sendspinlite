@@ -18,6 +18,10 @@ object PlaybackHealthRules {
 
     /**
      * Returns true when playback should be treated as starved and a reconnect is warranted.
+     *
+     * @param receivedAudioThisStream when false, skips empty-queue early detection. Stream start
+     *   primes the last-write timestamp before any PCM arrives; without this gate, a slow first
+     *   frame (common while clock sync settles on Portal / Echo Show) falsely triggers reconnect.
      */
     fun shouldReportStarvation(
         playbackState: String,
@@ -26,6 +30,7 @@ object PlaybackHealthRules {
         msSinceLastWrite: Long,
         outputQueueMs: Long,
         linkDegraded: Boolean,
+        receivedAudioThisStream: Boolean,
     ): Boolean {
         if (playbackState != "playing" || !audioOutputStarted) return false
         if (msSinceLastWrite < 0L) return false
@@ -41,7 +46,10 @@ object PlaybackHealthRules {
             return true
         }
 
-        if (isOutputQueueCriticallyLow(outputQueueMs, msSinceLastWrite)) {
+        if (
+            receivedAudioThisStream &&
+            isOutputQueueCriticallyLow(outputQueueMs, msSinceLastWrite)
+        ) {
             return true
         }
 
