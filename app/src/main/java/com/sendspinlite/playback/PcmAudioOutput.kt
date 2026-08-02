@@ -88,7 +88,32 @@ class PcmAudioOutput {
     @Volatile
     private var lastAppliedTrackGain: Float = 1.0f
 
+    /**
+     * Soft player mute. Applied as AudioTrack gain only — never touches
+     * [AudioManager.STREAM_MUSIC], so other apps can keep using the shared media stream.
+     */
+    @Volatile
+    private var playbackMuted: Boolean = false
+
     fun isStarted(): Boolean = started.get()
+
+    fun isPlaybackMuted(): Boolean = playbackMuted
+
+    /**
+     * Mute/unmute this player's AudioTrack only. Does not change system stream volume
+     * or request audio focus, so concurrent STREAM_MUSIC users are unaffected.
+     */
+    fun setPlaybackMuted(muted: Boolean) {
+        synchronized(lock) {
+            if (playbackMuted == muted) return
+            playbackMuted = muted
+            val trackRef = track
+            if (trackRef != null && trackRef.state == AudioTrack.STATE_INITIALIZED) {
+                applyEffectiveGainLocked(trackRef, currentSoftStartGainLocked())
+            }
+        }
+        Log.i(tag, "Playback muted=$muted (AudioTrack gain only; STREAM_MUSIC unchanged)")
+    }
 
     fun start(
         sampleRate: Int,
@@ -179,6 +204,8 @@ class PcmAudioOutput {
             // Use at least bufferFloorBytes, or multiplier * safeMinBuf, whichever is larger
             val bufferBytes = maxOf(safeMinBuf * multiplier, bufferFloorBytes)
 
+            // USAGE_MEDIA → shared STREAM_MUSIC mixer path. No exclusive/low-latency flags,
+            // no AudioFocus request — other apps may play on STREAM_MUSIC concurrently.
             val attrs =
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -560,8 +587,8 @@ class PcmAudioOutput {
     }
 
     private fun beginSoftStartLocked(track: AudioTrack) {
-        applyTrackGainLocked(track, 0f)
         softStartBeganAtMs = SystemClock.elapsedRealtime()
+        applyEffectiveGainLocked(track, 0f)
     }
 
     private fun clearSoftStartLocked() {
@@ -569,29 +596,51 @@ class PcmAudioOutput {
         lastAppliedTrackGain = 0f
     }
 
+    /** Soft-start envelope only (0–1), ignoring mute/volume. Caller must hold [lock]. */
+    private fun currentSoftStartGainLocked(): Float {
+        val beganAtMs = softStartBeganAtMs
+        if (beganAtMs == 0L) return 1.0f
+        val elapsedMs = (SystemClock.elapsedRealtime() - beganAtMs).coerceAtLeast(0L)
+        return if (elapsedMs >= SOFT_START_RAMP_MS) {
+            1.0f
+        } else {
+            (elapsedMs.toFloat() / SOFT_START_RAMP_MS.toFloat()).coerceIn(0f, 1.0f)
+        }
+    }
+
     private fun updateSoftStartGain(track: AudioTrack) {
         val beganAtMs = softStartBeganAtMs
         if (beganAtMs == 0L) return
 
-        val elapsedMs = (SystemClock.elapsedRealtime() - beganAtMs).coerceAtLeast(0L)
-        val gain =
-            if (elapsedMs >= SOFT_START_RAMP_MS) {
-                1.0f
-            } else {
-                (elapsedMs.toFloat() / SOFT_START_RAMP_MS.toFloat()).coerceIn(0f, 1.0f)
-            }
+        val softGain = currentSoftStartGainLocked()
 
         synchronized(lock) {
             if (this.track !== track || track.state != AudioTrack.STATE_INITIALIZED) return
+            val effective = effectiveGainLocked(softGain)
             val shouldApply =
-                kotlin.math.abs(gain - lastAppliedTrackGain) >= 0.05f || gain >= 0.999f || lastAppliedTrackGain == 0f
+                kotlin.math.abs(effective - lastAppliedTrackGain) >= 0.05f ||
+                    softGain >= 0.999f ||
+                    lastAppliedTrackGain == 0f
             if (shouldApply) {
-                applyTrackGainLocked(track, gain)
+                applyEffectiveGainLocked(track, softGain)
             }
-            if (gain >= 0.999f) {
+            if (softGain >= 0.999f) {
                 softStartBeganAtMs = 0L
             }
         }
+    }
+
+    /** Combine soft-start and mute into a single AudioTrack gain. Caller holds [lock]. */
+    private fun effectiveGainLocked(softStartGain: Float): Float {
+        if (playbackMuted) return 0f
+        return softStartGain.coerceIn(0f, 1.0f)
+    }
+
+    private fun applyEffectiveGainLocked(
+        track: AudioTrack,
+        softStartGain: Float,
+    ) {
+        applyTrackGainLocked(track, effectiveGainLocked(softStartGain))
     }
 
     private fun applyTrackGainLocked(

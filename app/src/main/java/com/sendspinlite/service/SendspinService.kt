@@ -229,13 +229,14 @@ class SendspinService : Service() {
         isTV = checkIsTV()
         isLowMemoryDevice = AppMemoryPolicy.isLeanDevice(this)
 
-        // Initialize UI state with current system volume and mute state
+        // Initialize UI state with current system media volume. Player mute is app-level
+        // (AudioTrack gain) and must not be derived from STREAM_MUSIC mute, or we would
+        // treat another app's stream mute as our own.
         val initialVolume = getSystemMediaVolume()
-        val initialMute = getSystemMuteState()
         _uiState.value =
             _uiState.value.copy(
                 playerVolume = initialVolume,
-                playerMuted = initialMute,
+                playerMuted = false,
             )
 
         createNotificationChannel()
@@ -760,8 +761,16 @@ class SendspinService : Service() {
         activeClient.onReleaseHighPerformance = {
             wifiLock?.let { if (it.isHeld) it.release() }
         }
+        // Refresh STREAM_MUSIC now — stale uiState volume (or a prior server echo of 0) must not
+        // be what we push on the first client/state after connect/reconnect.
+        val currentVolume = getSystemMediaVolume()
+        _uiState.value =
+            _uiState.value.copy(
+                playerVolume = currentVolume,
+                playerVolumeFromServer = false,
+            )
         activeClient.setStaticDelayMs(_uiState.value.staticDelayMs)
-        activeClient.setPlayerVolume(_uiState.value.playerVolume)
+        activeClient.setPlayerVolume(currentVolume)
         activeClient.setPlayerMute(_uiState.value.playerMuted)
 
         attachClientCollectors(activeClient)
@@ -816,11 +825,9 @@ class SendspinService : Service() {
                     )
             }
             is ClientEvent.ServerMutedChanged -> {
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                if (event.muted) {
-                    audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
-                    Log.i(tag, "Applied server mute command: muted=true")
-                }
+                // Mute already applied as AudioTrack gain in SendspinNativeClient.onMuteChanged.
+                // Do not touch STREAM_MUSIC — that would silence concurrent media apps.
+                Log.i(tag, "Server mute reflected in UI: muted=${event.muted}")
                 markServerVolumeSet()
 
                 _uiState.value =
@@ -1353,20 +1360,6 @@ class SendspinService : Service() {
         } catch (e: Exception) {
             Log.w(tag, "Failed to get system media volume", e)
             100
-        }
-    }
-
-    private fun getSystemMuteState(): Boolean {
-        return try {
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                audioManager.isStreamMute(android.media.AudioManager.STREAM_MUSIC)
-            } else {
-                audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) == 0
-            }
-        } catch (e: Exception) {
-            Log.w(tag, "Failed to get system mute state", e)
-            false
         }
     }
 

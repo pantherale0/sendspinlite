@@ -88,6 +88,13 @@ class SendspinNativeClient(
     @Volatile
     private var pendingStaticDelayMs: Long = 0L
 
+    /** Held until the native handle exists; native PlayerRole defaults volume to 0. */
+    @Volatile
+    private var pendingVolume: Int = 100
+
+    @Volatile
+    private var pendingMuted: Boolean = false
+
     @Volatile
     private var firstTimeSyncedAtMs: Long = 0L
 
@@ -138,16 +145,24 @@ class SendspinNativeClient(
                 softwareVersion = SOFTWARE_VERSION,
                 fixedDelayUs = BASELINE_FIXED_DELAY_US,
                 audioBufferCapacity = AppMemoryPolicy.nativeRingBufferBytes(leanDevice),
-                initialStaticDelayMs = 0,
+                initialStaticDelayMs = pendingStaticDelayMs.toInt().coerceIn(0, 5000),
             )
         if (handle == 0L) {
             Log.e(tag, "nativeCreate failed")
             return false
         }
+        // Native PlayerRole defaults volume=0 / muted=false. Apply any values that were set
+        // before the handle existed so the first post-handshake client/state is correct.
+        SendspinNative.nativeUpdateVolume(handle, pendingVolume)
+        SendspinNative.nativeUpdateMuted(handle, pendingMuted)
+        if (pendingStaticDelayMs > 0L) {
+            SendspinNative.nativeUpdateStaticDelay(handle, pendingStaticDelayMs.toInt().coerceIn(0, 5000))
+        }
         Log.i(
             tag,
             "Native client created (lean=$leanDevice, ringBuffer=" +
-                "${AppMemoryPolicy.nativeRingBufferBytes(leanDevice)} bytes)",
+                "${AppMemoryPolicy.nativeRingBufferBytes(leanDevice)} bytes, " +
+                "volume=$pendingVolume, muted=$pendingMuted, staticDelayMs=$pendingStaticDelayMs)",
         )
         return true
     }
@@ -267,6 +282,7 @@ class SendspinNativeClient(
 
     fun setPlayerVolume(volume: Int) {
         val clamped = volume.coerceIn(0, 100)
+        pendingVolume = clamped
         synchronized(handleLock) {
             val h = handle
             if (h != 0L) SendspinNative.nativeUpdateVolume(h, clamped)
@@ -275,10 +291,13 @@ class SendspinNativeClient(
     }
 
     fun setPlayerMute(muted: Boolean) {
+        pendingMuted = muted
         synchronized(handleLock) {
             val h = handle
             if (h != 0L) SendspinNative.nativeUpdateMuted(h, muted)
         }
+        // Mute via AudioTrack gain only — never silence system STREAM_MUSIC for other apps.
+        output.setPlaybackMuted(muted)
         updateDiagnostics { it.copy(playerMuted = muted, playerMutedFromServer = false) }
     }
 
@@ -656,6 +675,9 @@ class SendspinNativeClient(
     }
 
     override fun onMuteChanged(muted: Boolean) {
+        // Apply immediately on the output path so mute never depends on the service
+        // touching system STREAM_MUSIC (which would silence concurrent media apps).
+        output.setPlaybackMuted(muted)
         _events.tryEmit(ClientEvent.ServerMutedChanged(muted))
         updateDiagnostics { it.copy(playerMuted = muted, playerMutedFromServer = true) }
     }
