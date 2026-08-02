@@ -48,7 +48,8 @@ graph TD
   - `MainActivity.kt`: Contains Compose layout screens (volume controls, server state charts, network telemetries, log dumps).
   - `PlayerViewModel.kt`: Intermediates between the frontend UI and the background foreground service.
 - **`com.sendspinlite.service`**:
-  - `SendspinService.kt`: Run as an Android foreground service with a persistent status notification to ensure the OS does not terminate active audio playout when the app is in the background. Wires native high-performance requests to the WiFi lock.
+  - `SendspinService.kt`: Run as an Android foreground service with a persistent status notification to ensure the OS does not terminate active audio playout when the app is in the background. Wires native high-performance requests to the WiFi lock. Implements software audio volume ducking (coroutine-driven volume ramping via local `AudioTrack` gain) independently of system master volume and protocol player volume.
+  - `SendspinIntentReceiver.kt`: Context-registered exported `BroadcastReceiver` (registered while `SendspinService` is alive) that forwards external broadcast intents (`com.sendspinlite.ACTION_DUCK`, `com.sendspinlite.ACTION_UNDUCK`, `com.sendspinlite.ACTION_SET_APP_VOLUME`, `com.sendspinlite.ACTION_TOGGLE_DUCK`) into the service for Voice Assistants (e.g. Home Assistant, Tasker). Manifest-only registration is not used because custom implicit broadcasts are blocked on modern `targetSdk`.
 - **`com.sendspinlite.client`**:
   - `SendspinNativeClient.kt`: Kotlin wrapper around the native client; owns the `AudioTrack` output, exposes the diagnostics/events surface the service consumes, and feeds playback progress back to the native sync task.
   - `SendspinNative.kt`: Thin JNI loader exposing the native lifecycle (`nativeCreate`/`nativeStart`/`nativeConnect`/...) plus the `SendspinNativeCallbacks` interface invoked from native threads.
@@ -58,7 +59,7 @@ graph TD
   - `sendspin_client_handle.{h,cpp}`: Owns the `SendspinClient`, player + metadata roles, listeners and the main-loop thread; defines the JNI entry points.
   - `android_player_listener.cpp` / `android_metadata_listener.cpp` / `android_client_listener.cpp` / `android_network_provider.cpp`: Forward sendspin-cpp callbacks to Kotlin.
 - **`com.sendspinlite.playback`**:
-  - `PcmAudioOutput.kt`: Low-level wrapper of Android's `AudioTrack` class. Implements the `on_audio_write` contract (`writePcm(ByteBuffer, …)`) and reports presented frames via `getPlaybackProgress()`.
+  - `PcmAudioOutput.kt`: Low-level wrapper of Android's `AudioTrack` class. Implements the `on_audio_write` contract (`writePcm(ByteBuffer, …)`) and reports presented frames via `getPlaybackProgress()`. Composes soft-start, mute, app volume, and duck multipliers into `AudioTrack.setVolume`.
   - `PcmFormatSupport.kt`: Probes which PCM sample-rate/channel/bit-depth combinations the device supports.
   - `PlaybackDiagnostics.kt`: Constants representing active playout recovery states.
   - `SendspinAudioWarmup.kt`: Silent PCM format warmup checks used to estimate baseline device pipeline delay.

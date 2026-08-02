@@ -52,6 +52,13 @@ This project is specially designed for low memory devices and a local network co
   - Memory-aware operation for low-end devices
   - Watchdog monitoring for connection stability
 
+### Audio Ducking & Intent API
+- **Independent App Volume & Software Ducking**
+  - Smooth coroutine-driven audio volume ducking (fade-in / fade-out) via local `AudioTrack` gain
+  - Independent of Android system master volume so external Voice Assistants (e.g. Home Assistant, Tasker, Rhasspy) remain crisp and clear
+  - Broadcast intent integration allowing external apps to duck, unduck, toggle, or adjust app volume dynamically
+  - Ducking does not publish temporary levels as protocol player volume
+
 ### Crash & ANR Reporting (opt-in)
 - **Privacy-first crash reporting**
   - Detects hard crashes and App Not Responding (ANR) conditions
@@ -61,6 +68,52 @@ This project is specially designed for low memory devices and a local network co
   - No data is ever collected or transmitted unless opted-in
   - Sentry is not used for anything other than reports for crashes/ANR or audio issues (triggered manually by pressing the dedicated button)
   - Only available in builds where a Sentry DSN has been configured (see [Development](#development-status))
+
+## Audio Ducking & Intent API Guide
+
+SendSpin supports external volume ducking via Android Broadcast Intents. This allows Voice Assistants, Home Assistant Satellite devices, or Tasker to duck SendSpin's playback volume when listening or speaking without affecting system master volume or the Sendspin protocol player volume.
+
+Ducking is applied as local `AudioTrack.setVolume` gain (composed with mute and soft-start), not by changing `STREAM_MUSIC`.
+
+**Requirement:** SendSpin's playback service must already be running (connected/playing). The duck receiver is registered dynamically while the service is alive so other apps can deliver custom broadcast actions.
+
+**Recommended:** Target the SendSpin package when sending (`setPackage("com.sendspinlite")` / Tasker "Package" field / `adb -p com.sendspinlite`).
+
+### Supported Broadcast Intent Actions
+
+| Action | Purpose | Extras |
+|---|---|---|
+| `com.sendspinlite.ACTION_DUCK` | Ducks audio playback volume | `DUCK_PERCENT` (Int 0-100, default 20), `RAMP_MS` (Long, default 200), `DURATION_MS` (Long, optional auto-restore timeout) |
+| `com.sendspinlite.ACTION_UNDUCK` | Restores audio volume to normal | `RAMP_MS` (Long, default 400) |
+| `com.sendspinlite.ACTION_SET_APP_VOLUME` | Sets base app audio volume | `VOLUME` or `PERCENT` (Int 0-100) |
+| `com.sendspinlite.ACTION_TOGGLE_DUCK` | Toggles ducking state | `DUCK_PERCENT` (Int 0-100, default 20), `RAMP_MS` (Long, default 200) |
+
+### ADB Examples
+
+```bash
+# Duck audio to 20% over 200ms (package-targeted)
+adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_DUCK --ei DUCK_PERCENT 20 --el RAMP_MS 200
+
+# Unduck audio back to 100% over 400ms
+adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_UNDUCK --el RAMP_MS 400
+
+# Duck audio for a temporary 3-second duration
+adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_DUCK --ei DUCK_PERCENT 15 --el DURATION_MS 3000
+
+# Set app software volume to 80%
+adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_SET_APP_VOLUME --ei VOLUME 80
+```
+
+### From another app (Kotlin)
+
+```kotlin
+val intent = Intent("com.sendspinlite.ACTION_DUCK").apply {
+    setPackage("com.sendspinlite")
+    putExtra("DUCK_PERCENT", 20)
+    putExtra("RAMP_MS", 200L)
+}
+context.sendBroadcast(intent)
+```
 
 ## Requirements
 

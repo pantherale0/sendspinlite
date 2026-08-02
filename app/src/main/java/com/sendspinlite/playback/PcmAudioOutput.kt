@@ -95,6 +95,14 @@ class PcmAudioOutput {
     @Volatile
     private var playbackMuted: Boolean = false
 
+    /** Independent app software volume (0–1). Composed into AudioTrack gain. */
+    @Volatile
+    private var appVolumeGain: Float = 1.0f
+
+    /** Temporary duck multiplier (0–1). Composed into AudioTrack gain. */
+    @Volatile
+    private var duckGain: Float = 1.0f
+
     fun isStarted(): Boolean = started.get()
 
     fun isPlaybackMuted(): Boolean = playbackMuted
@@ -113,6 +121,38 @@ class PcmAudioOutput {
             }
         }
         Log.i(tag, "Playback muted=$muted (AudioTrack gain only; STREAM_MUSIC unchanged)")
+    }
+
+    /**
+     * Set independent app software volume (0–1). Does not change system STREAM_MUSIC
+     * or protocol player volume.
+     */
+    fun setAppVolumeGain(gain: Float) {
+        val clamped = gain.coerceIn(0f, 1.0f)
+        synchronized(lock) {
+            if (appVolumeGain == clamped) return
+            appVolumeGain = clamped
+            val trackRef = track
+            if (trackRef != null && trackRef.state == AudioTrack.STATE_INITIALIZED) {
+                applyEffectiveGainLocked(trackRef, currentSoftStartGainLocked())
+            }
+        }
+    }
+
+    /**
+     * Set temporary duck multiplier (0–1). Does not change system STREAM_MUSIC
+     * or protocol player volume.
+     */
+    fun setDuckGain(gain: Float) {
+        val clamped = gain.coerceIn(0f, 1.0f)
+        synchronized(lock) {
+            if (duckGain == clamped) return
+            duckGain = clamped
+            val trackRef = track
+            if (trackRef != null && trackRef.state == AudioTrack.STATE_INITIALIZED) {
+                applyEffectiveGainLocked(trackRef, currentSoftStartGainLocked())
+            }
+        }
     }
 
     fun start(
@@ -630,10 +670,13 @@ class PcmAudioOutput {
         }
     }
 
-    /** Combine soft-start and mute into a single AudioTrack gain. Caller holds [lock]. */
+    /**
+     * Combine soft-start, mute, app volume, and duck into a single AudioTrack gain.
+     * Caller holds [lock].
+     */
     private fun effectiveGainLocked(softStartGain: Float): Float {
         if (playbackMuted) return 0f
-        return softStartGain.coerceIn(0f, 1.0f)
+        return (softStartGain * appVolumeGain * duckGain).coerceIn(0f, 1.0f)
     }
 
     private fun applyEffectiveGainLocked(

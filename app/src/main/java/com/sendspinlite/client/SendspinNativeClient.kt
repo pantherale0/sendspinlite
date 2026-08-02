@@ -301,6 +301,22 @@ class SendspinNativeClient(
         updateDiagnostics { it.copy(playerMuted = muted, playerMutedFromServer = false) }
     }
 
+    /**
+     * Independent app software volume (0–1) via AudioTrack gain.
+     * Does not publish protocol player volume or change STREAM_MUSIC.
+     */
+    fun setAppVolumeGain(gain: Float) {
+        output.setAppVolumeGain(gain)
+    }
+
+    /**
+     * Temporary duck multiplier (0–1) via AudioTrack gain.
+     * Does not publish protocol player volume or change STREAM_MUSIC.
+     */
+    fun setDuckGain(gain: Float) {
+        output.setDuckGain(gain)
+    }
+
     /** Sends a transport command (play, pause, next, previous, stop, etc.) to the server. */
     fun sendTransportCommand(command: String): Boolean {
         val sent =

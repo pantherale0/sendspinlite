@@ -27,6 +27,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import com.sendspinlite.client.ClientDiagnostics
 import com.sendspinlite.client.ClientEvent
@@ -163,6 +164,20 @@ class SendspinService : Service() {
     private var lastServerVolumeSetMs: Long = 0L
     private val volumeSuppressWindowMs: Long = 500L
 
+    @Volatile
+    private var isDucked: Boolean = false
+
+    /** Independent app software volume (0–100); composed into AudioTrack gain. */
+    @Volatile
+    private var unDuckedBaseVolume: Int = 100
+
+    /** Temporary duck multiplier (1.0 = unducked). */
+    @Volatile
+    private var currentDuckMultiplier: Float = 1.0f
+
+    private var duckRampJob: Job? = null
+    private var autoUnduckJob: Job? = null
+
     // Track the last connection URL to prevent duplicate connections
     private var lastConnectUrl: String? = null
     private var lastConnectTime: Long = 0
@@ -183,6 +198,18 @@ class SendspinService : Service() {
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "sendspin_playback"
+
+        const val ACTION_DUCK = "com.sendspinlite.ACTION_DUCK"
+        const val ACTION_UNDUCK = "com.sendspinlite.ACTION_UNDUCK"
+        const val ACTION_SET_APP_VOLUME = "com.sendspinlite.ACTION_SET_APP_VOLUME"
+        const val ACTION_TOGGLE_DUCK = "com.sendspinlite.ACTION_TOGGLE_DUCK"
+
+        const val EXTRA_DUCK_PERCENT = "DUCK_PERCENT"
+        const val EXTRA_PERCENT = "PERCENT"
+        const val EXTRA_RAMP_MS = "RAMP_MS"
+        const val EXTRA_FADE_MS = "FADE_MS"
+        const val EXTRA_DURATION_MS = "DURATION_MS"
+        const val EXTRA_VOLUME = "VOLUME"
 
         fun startService(
             context: Context,
@@ -267,6 +294,11 @@ class SendspinService : Service() {
         // Memory trim must be registered early so LMK pressure is handled during cold start.
         memoryTrimCallback = createMemoryTrimCallback()
         registerComponentCallbacks(memoryTrimCallback)
+
+        // Duck/unduck intents from other apps (HA, Tasker, etc.) require a context-registered
+        // exported receiver — manifest registration alone does not receive custom implicit
+        // broadcasts on modern targetSdk.
+        registerIntentReceiver()
     }
 
     /**
@@ -382,6 +414,50 @@ class SendspinService : Service() {
             return START_STICKY
         }
 
+        val action = intent.action
+        if (action != null) {
+            when (action) {
+                ACTION_DUCK -> {
+                    val percent =
+                        intent.getIntExtra(EXTRA_DUCK_PERCENT, intent.getIntExtra(EXTRA_PERCENT, 20))
+                    val rampMs =
+                        intent.getLongExtra(EXTRA_RAMP_MS, intent.getLongExtra(EXTRA_FADE_MS, 200L))
+                    val durationMs =
+                        if (intent.hasExtra(EXTRA_DURATION_MS)) {
+                            intent.getLongExtra(EXTRA_DURATION_MS, -1L)
+                        } else {
+                            null
+                        }
+                    duckAudio(
+                        duckPercent = percent,
+                        rampMs = rampMs,
+                        durationMs = if (durationMs != null && durationMs > 0) durationMs else null,
+                    )
+                    return START_STICKY
+                }
+                ACTION_UNDUCK -> {
+                    val rampMs =
+                        intent.getLongExtra(EXTRA_RAMP_MS, intent.getLongExtra(EXTRA_FADE_MS, 400L))
+                    unduckAudio(rampMs = rampMs)
+                    return START_STICKY
+                }
+                ACTION_SET_APP_VOLUME -> {
+                    val volume =
+                        intent.getIntExtra(EXTRA_VOLUME, intent.getIntExtra(EXTRA_PERCENT, 100))
+                    setAppVolume(volume)
+                    return START_STICKY
+                }
+                ACTION_TOGGLE_DUCK -> {
+                    val percent =
+                        intent.getIntExtra(EXTRA_DUCK_PERCENT, intent.getIntExtra(EXTRA_PERCENT, 20))
+                    val rampMs =
+                        intent.getLongExtra(EXTRA_RAMP_MS, intent.getLongExtra(EXTRA_FADE_MS, 200L))
+                    toggleDuck(duckPercent = percent, rampMs = rampMs)
+                    return START_STICKY
+                }
+            }
+        }
+
         val mediaAction = intent.getStringExtra("media_action")
         if (mediaAction != null) {
             dispatchTransportCommand(mediaAction)
@@ -431,6 +507,8 @@ class SendspinService : Service() {
         memoryTrimCallback?.let { unregisterComponentCallbacks(it) }
         memoryTrimCallback = null
 
+        unregisterIntentReceiver()
+
         // Unregister deferred components only if they were started
         if (auxiliaryStarted) {
             unregisterNetworkReceiver()
@@ -455,6 +533,11 @@ class SendspinService : Service() {
             }
         }
         wifiLock = null
+
+        duckRampJob?.cancel()
+        duckRampJob = null
+        autoUnduckJob?.cancel()
+        autoUnduckJob = null
 
         scope.cancel()
         super.onDestroy()
@@ -772,6 +855,8 @@ class SendspinService : Service() {
         activeClient.setStaticDelayMs(_uiState.value.staticDelayMs)
         activeClient.setPlayerVolume(currentVolume)
         activeClient.setPlayerMute(_uiState.value.playerMuted)
+        // Re-apply local duck / app-volume gain on the new AudioTrack (protocol volume untouched).
+        applyEffectiveVolume()
 
         attachClientCollectors(activeClient)
         startHealthMonitoring()
@@ -1128,13 +1213,97 @@ class SendspinService : Service() {
         client?.setStaticDelayMs(clamped)
     }
 
-    // Player (local device) volume controls
+    // Player (local device) volume controls — protocol / STREAM_MUSIC sync only.
     fun setPlayerVolume(volume: Int) {
         client?.setPlayerVolume(volume)
     }
 
     fun setPlayerMute(muted: Boolean) {
         client?.setPlayerMute(muted)
+    }
+
+    /**
+     * Duck playback to [duckPercent]% residual level via AudioTrack gain.
+     * Does not change protocol player volume or system STREAM_MUSIC.
+     */
+    fun duckAudio(
+        duckPercent: Int = 20,
+        rampMs: Long = 200L,
+        durationMs: Long? = null,
+    ) {
+        val targetMultiplier = duckPercent.coerceIn(0, 100) / 100.0f
+        isDucked = true
+        autoUnduckJob?.cancel()
+
+        rampDuckMultiplier(targetMultiplier, rampMs)
+
+        if (durationMs != null && durationMs > 0) {
+            autoUnduckJob =
+                scope.launch {
+                    delay(durationMs)
+                    unduckAudio(rampMs)
+                }
+        }
+    }
+
+    /** Restore unducked AudioTrack gain. */
+    fun unduckAudio(rampMs: Long = 400L) {
+        isDucked = false
+        autoUnduckJob?.cancel()
+        autoUnduckJob = null
+        rampDuckMultiplier(1.0f, rampMs)
+    }
+
+    fun toggleDuck(
+        duckPercent: Int = 20,
+        rampMs: Long = 200L,
+    ) {
+        if (isDucked) {
+            unduckAudio(rampMs)
+        } else {
+            duckAudio(duckPercent, rampMs)
+        }
+    }
+
+    /**
+     * Set independent app software volume (0–100). Applied as AudioTrack gain;
+     * does not change protocol player volume or system STREAM_MUSIC.
+     */
+    fun setAppVolume(volume: Int) {
+        unDuckedBaseVolume = volume.coerceIn(0, 100)
+        applyEffectiveVolume()
+    }
+
+    private fun rampDuckMultiplier(
+        targetMultiplier: Float,
+        durationMs: Long,
+    ) {
+        duckRampJob?.cancel()
+        if (durationMs <= 0) {
+            currentDuckMultiplier = targetMultiplier
+            applyEffectiveVolume()
+            return
+        }
+        duckRampJob =
+            scope.launch(Dispatchers.Default) {
+                val startMultiplier = currentDuckMultiplier
+                val stepMs = 20L
+                val totalSteps = (durationMs / stepMs).coerceAtLeast(1L)
+                for (step in 1..totalSteps) {
+                    val progress = step.toFloat() / totalSteps.toFloat()
+                    currentDuckMultiplier =
+                        startMultiplier + (targetMultiplier - startMultiplier) * progress
+                    applyEffectiveVolume()
+                    delay(stepMs)
+                }
+                currentDuckMultiplier = targetMultiplier
+                applyEffectiveVolume()
+            }
+    }
+
+    private fun applyEffectiveVolume() {
+        client?.setAppVolumeGain(unDuckedBaseVolume / 100.0f)
+        client?.setDuckGain(currentDuckMultiplier)
     }
 
     fun clearPlayerVolumeFlag() {
@@ -1426,6 +1595,48 @@ class SendspinService : Service() {
             }
         }
         volumeChangeReceiver = null
+    }
+
+    private var sendspinIntentReceiverRegistered = false
+    private var sendspinIntentReceiver: SendspinIntentReceiver? = null
+
+    private fun registerIntentReceiver() {
+        if (sendspinIntentReceiverRegistered) return
+        val receiver = SendspinIntentReceiver()
+        sendspinIntentReceiver = receiver
+        try {
+            val filter =
+                IntentFilter().apply {
+                    addAction(ACTION_DUCK)
+                    addAction(ACTION_UNDUCK)
+                    addAction(ACTION_SET_APP_VOLUME)
+                    addAction(ACTION_TOGGLE_DUCK)
+                }
+            ContextCompat.registerReceiver(
+                this,
+                receiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED,
+            )
+            sendspinIntentReceiverRegistered = true
+            Log.i(tag, "SendspinIntentReceiver registered dynamically for duck/unduck actions")
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to register SendspinIntentReceiver dynamically", e)
+        }
+    }
+
+    private fun unregisterIntentReceiver() {
+        if (!sendspinIntentReceiverRegistered) return
+        sendspinIntentReceiver?.let {
+            try {
+                unregisterReceiver(it)
+                Log.i(tag, "SendspinIntentReceiver unregistered")
+            } catch (e: Exception) {
+                Log.w(tag, "Failed to unregister SendspinIntentReceiver", e)
+            }
+        }
+        sendspinIntentReceiver = null
+        sendspinIntentReceiverRegistered = false
     }
 
     private fun applyDiagnosticsFromClient(diag: ClientDiagnostics) {
