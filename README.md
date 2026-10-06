@@ -58,6 +58,10 @@ This project is specially designed for low memory devices and a local network co
   - Independent of Android system master volume so external Voice Assistants (e.g. Home Assistant, Tasker, Rhasspy) remain crisp and clear
   - Broadcast intent integration allowing external apps to duck, unduck, toggle, or adjust app volume dynamically
   - Ducking does not publish temporary levels as protocol player volume
+- **Exclusive Audio (opt-in, Settings)**
+  - Takes Android audio focus while playing, so voice assistants that ask for transient focus (Alexa on an Echo, navigation prompts) duck SendSpin automatically, with no intents needed
+  - A may-duck request lowers playback to 20%, an exclusive one to 10%; it ramps back up when they're done
+  - Other apps that respect audio focus pause when SendSpin starts, which is why it's off by default
 
 ### Crash & ANR Reporting (opt-in)
 - **Privacy-first crash reporting**

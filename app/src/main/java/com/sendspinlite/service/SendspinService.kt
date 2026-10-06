@@ -34,6 +34,7 @@ import com.sendspinlite.client.ClientEvent
 import com.sendspinlite.client.SendspinNativeClient
 import com.sendspinlite.diagnostics.DiagnosticsDelta
 import com.sendspinlite.network.ReconnectPolicy
+import com.sendspinlite.playback.AudioFocusDucker
 import com.sendspinlite.system.AppMemoryPolicy
 import com.sendspinlite.ui.MainActivity
 import com.sendspinlite.ui.PlayerViewModel
@@ -84,6 +85,31 @@ class SendspinService : Service() {
     private var mediaSession: MediaSessionCompat? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+
+    // Holds audio focus while playing so voice assistants can duck us, when
+    // "Exclusive audio" is on - see AudioFocusDucker
+    private val audioFocusDucker by lazy {
+        AudioFocusDucker(
+            this,
+            onDuck = { percent -> duckAudio(duckPercent = percent) },
+            onUnduck = { unduckAudio() },
+        )
+    }
+
+    // Whether we were playing at the last state update, so flipping the setting
+    // mid-song takes or drops focus straight away rather than at the next update
+    @Volatile
+    private var playingForFocus = false
+
+    private val exclusiveAudioListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key != AudioFocusDucker.KEY_EXCLUSIVE_AUDIO) return@OnSharedPreferenceChangeListener
+            if (AudioFocusDucker.isEnabled(this) && playingForFocus) {
+                audioFocusDucker.request()
+            } else {
+                audioFocusDucker.abandon()
+            }
+        }
 
     private val _uiState = MutableStateFlow(PlayerViewModel.UiState())
     val uiState: StateFlow<PlayerViewModel.UiState> = _uiState
@@ -252,6 +278,9 @@ class SendspinService : Service() {
         super.onCreate()
         Log.i(tag, "Service created")
 
+        getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(exclusiveAudioListener)
+
         // Initialize low-memory detection now that context is ready
         isTV = checkIsTV()
         isLowMemoryDevice = AppMemoryPolicy.isLeanDevice(this)
@@ -366,6 +395,14 @@ class SendspinService : Service() {
                                     Log.i(tag, "WifiLock released dynamically (not playing)")
                                 }
                             }
+                        }
+
+                        // Same trigger as the locks: hold focus only while actually playing
+                        playingForFocus = shouldHoldWifiLock
+                        if (shouldHoldWifiLock && AudioFocusDucker.isEnabled(this@SendspinService)) {
+                            audioFocusDucker.request()
+                        } else {
+                            audioFocusDucker.abandon()
                         }
 
                         if (ReconnectPolicy.shouldAutoReconnect(state.status) && reconnectJob == null) {
@@ -498,6 +535,8 @@ class SendspinService : Service() {
 
     override fun onDestroy() {
         Log.i(tag, "Service destroyed")
+        getSharedPreferences("SendspinPlayerPrefs", Context.MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(exclusiveAudioListener)
         disconnect()
 
         mediaSession?.release()
@@ -533,6 +572,8 @@ class SendspinService : Service() {
             }
         }
         wifiLock = null
+
+        audioFocusDucker.abandon()
 
         duckRampJob?.cancel()
         duckRampJob = null

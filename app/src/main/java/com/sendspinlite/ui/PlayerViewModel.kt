@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import com.sendspinlite.diagnostics.CrashReportingManager
 import com.sendspinlite.network.DiscoveredServer
 import com.sendspinlite.network.ServiceDiscovery
+import com.sendspinlite.playback.AudioFocusDucker
 import com.sendspinlite.playback.PlaybackDiagnostics
 import com.sendspinlite.service.SendspinService
 import com.sendspinlite.system.SendspinSystemUtils
@@ -45,6 +46,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun setCrashReportingEnabled(enabled: Boolean) {
         CrashReportingManager.setCrashReportingEnabled(getApplication(), enabled)
         _crashReportingEnabled.value = enabled
+    }
+
+    /** "Exclusive audio": take audio focus while playing so voice assistants can duck us. */
+    private val _exclusiveAudioEnabled = MutableStateFlow(AudioFocusDucker.isEnabled(app))
+    val exclusiveAudioEnabled: StateFlow<Boolean> = _exclusiveAudioEnabled
+
+    fun setExclusiveAudioEnabled(enabled: Boolean) {
+        // The service listens for this key and takes or drops focus straight away
+        AudioFocusDucker.setEnabled(getApplication(), enabled)
+        _exclusiveAudioEnabled.value = enabled
     }
 
     private val deviceId: String = getOrCreateDeviceId()

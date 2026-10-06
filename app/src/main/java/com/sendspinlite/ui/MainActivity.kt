@@ -150,6 +150,7 @@ private fun PlayerScreen(vm: PlayerViewModel) {
     val ui by vm.ui.collectAsState()
     val discoveredServers by vm.discoveredServers.collectAsState()
     val crashReportingEnabled by vm.crashReportingEnabled.collectAsState()
+    val exclusiveAudioEnabled by vm.exclusiveAudioEnabled.collectAsState()
     val scrollState = rememberScrollState()
 
     // State for title tap counter (5 taps to export logs)
@@ -907,6 +908,37 @@ private fun PlayerScreen(vm: PlayerViewModel) {
             elevation = 2.dp,
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
+                // Exclusive audio: take audio focus so voice assistants can duck us
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Exclusive Audio",
+                            style = MaterialTheme.typography.body2,
+                        )
+                        Text(
+                            text =
+                                "Take audio focus while playing. Other music apps pause when Sendspin " +
+                                    "starts, and voice assistants like Alexa can lower Sendspin while they " +
+                                    "listen and talk.",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
+                    Switch(
+                        checked = exclusiveAudioEnabled,
+                        onCheckedChange = { vm.setExclusiveAudioEnabled(it) },
+                    )
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 4.dp))
+
                 // Crash & ANR reporting opt-in toggle
                 Row(
                     modifier =
