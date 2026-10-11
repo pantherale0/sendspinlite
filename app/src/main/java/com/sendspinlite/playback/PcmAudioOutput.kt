@@ -53,10 +53,10 @@ class PcmAudioOutput {
     private var track: AudioTrack? = null
     private val started = AtomicBoolean(false)
 
-    // Track active writers to prevent releasing native object while in use
+    // Active writers must finish before AudioTrack is released.
     private val writingCount = AtomicInteger(0)
 
-    // Lock for synchronizing start/stop/pause operations
+    // Serializes start, stop, and pause.
     private val lock = Any()
 
     private var currentSampleRate = 48000
@@ -89,17 +89,17 @@ class PcmAudioOutput {
     private var lastAppliedTrackGain: Float = 1.0f
 
     /**
-     * Soft player mute. Applied as AudioTrack gain only — never touches
-     * [AudioManager.STREAM_MUSIC], so other apps can keep using the shared media stream.
+     * Mutes this AudioTrack through gain. Other apps can keep using
+     * [AudioManager.STREAM_MUSIC].
      */
     @Volatile
     private var playbackMuted: Boolean = false
 
-    /** Independent app software volume (0–1). Composed into AudioTrack gain. */
+    /** App volume from 0 to 1, combined with other track gains. */
     @Volatile
     private var appVolumeGain: Float = 1.0f
 
-    /** Temporary duck multiplier (0–1). Composed into AudioTrack gain. */
+    /** Temporary duck multiplier from 0 to 1, combined with other track gains. */
     @Volatile
     private var duckGain: Float = 1.0f
 
@@ -124,7 +124,7 @@ class PcmAudioOutput {
     }
 
     /**
-     * Set independent app software volume (0–1). Does not change system STREAM_MUSIC
+     * Set app volume from 0 to 1. Does not change system STREAM_MUSIC
      * or protocol player volume.
      */
     fun setAppVolumeGain(gain: Float) {
@@ -140,7 +140,7 @@ class PcmAudioOutput {
     }
 
     /**
-     * Set temporary duck multiplier (0–1). Does not change system STREAM_MUSIC
+     * Set the duck multiplier from 0 to 1. Does not change system STREAM_MUSIC
      * or protocol player volume.
      */
     fun setDuckGain(gain: Float) {
@@ -214,18 +214,16 @@ class PcmAudioOutput {
             lastMinBufBytes = minBuf
             val bytesPerFrame = channels * (bitDepth / 8)
 
-            // Define minimum baselines (100ms floor for raw minimum buffer, device-specific playback track floor)
+            // Use a 100 ms minimum and a separate device-specific track buffer floor.
             val buffer100ms = (safeSampleRate * 0.10 * bytesPerFrame).toInt()
             val bufferFloorMs = if (leanMode) BUFFER_FLOOR_MS_LEAN else BUFFER_FLOOR_MS_DEFAULT
             val bufferFloorBytes = (safeSampleRate * bufferFloorMs / 1000.0 * bytesPerFrame).toInt()
 
-            // Safeguard minBuf: if HAL returns invalid or tiny value, use a solid 100ms baseline
+            // Raise smaller HAL minimums to 100 ms.
             val safeMinBuf = maxOf(minBuf, buffer100ms)
 
-            // Calculate minimum buffer duration to detect devices with naturally large buffers.
-            // On high-latency devices (e.g. Snapdragon MSM8916, where minBuf is 80ms+), using a 4x multiplier
-            // inflates the buffer to 400ms+ and forces the Android OS deep-buffer playback path, causing massive
-            // hardware latency. Using a smaller 2x multiplier for these prevents triggering deep-buffer routing.
+            // Large buffers can select Android's deep-buffer path and increase output latency.
+            // Use a 2x multiplier on lean devices or when the HAL minimum exceeds 40 ms.
             val minBufMs =
                 if (safeSampleRate > 0 && bytesPerFrame > 0) {
                     (minBuf.toLong() * 1000L) / (safeSampleRate.toLong() * bytesPerFrame)
@@ -244,8 +242,8 @@ class PcmAudioOutput {
             // Use at least bufferFloorBytes, or multiplier * safeMinBuf, whichever is larger
             val bufferBytes = maxOf(safeMinBuf * multiplier, bufferFloorBytes)
 
-            // USAGE_MEDIA → shared STREAM_MUSIC mixer path. No exclusive/low-latency flags,
-            // no AudioFocus request — other apps may play on STREAM_MUSIC concurrently.
+            // Shared STREAM_MUSIC output uses no exclusive flags or audio-focus request.
+            // Other apps may play concurrently.
             val attrs =
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -334,10 +332,10 @@ class PcmAudioOutput {
         if (pcm.isEmpty()) return true
         if (!started.get()) return false
 
-        // Signal we are using the track
+        // Register the writer before checking the track state.
         writingCount.incrementAndGet()
         try {
-            // Double check state after increment
+            // Stop may have started before this writer registered.
             if (!started.get()) return false
 
             val t = track ?: return false
@@ -407,10 +405,9 @@ class PcmAudioOutput {
     }
 
     /**
-     * Writes PCM from a (typically direct) ByteBuffer to the AudioTrack, honouring the
-     * sendspin-cpp on_audio_write contract: write up to [length] bytes, block at most
-     * [timeoutMs], and return the number of bytes actually written. The buffer's position is
-     * advanced by the number of bytes consumed.
+     * Writes up to [length] PCM bytes from a ByteBuffer and returns the number written.
+     * A positive [timeoutMs] bounds retries. A nonpositive value uses a 500 ms fallback.
+     * AudioTrack advances the buffer position by the number of bytes consumed.
      */
     fun writePcm(
         buffer: ByteBuffer,
@@ -636,7 +633,7 @@ class PcmAudioOutput {
         lastAppliedTrackGain = 0f
     }
 
-    /** Soft-start envelope only (0–1), ignoring mute/volume. Caller must hold [lock]. */
+    /** Startup gain from 0 to 1, before mute and volume. Caller must hold [lock]. */
     private fun currentSoftStartGainLocked(): Float {
         val beganAtMs = softStartBeganAtMs
         if (beganAtMs == 0L) return 1.0f
@@ -738,7 +735,7 @@ class PcmAudioOutput {
      * playbackHeadPosition misses on devices such as Amazon Echo Show 8 running LineageOS
      * (android_device_amazon_crown)),
      * falling back to playbackHeadPosition when a timestamp is unavailable.
-     * No fixed 250 ms upper cap: high-latency devices are reported accurately.
+     * Allows latency estimates above 250 ms for devices with longer output pipelines.
      */
     fun getEstimatedPipelineLatencyUs(): Long {
         val bytesPerFrame = currentChannels * (currentBitDepth / 8)
@@ -912,11 +909,7 @@ class PcmAudioOutput {
             tag,
             "Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBufferMs=$deviceOptimalBufferMs",
         )
-        // For now we won't do anything with this, but we can explore adjusting the 250ms HAL buffer based on the deviceOptimalBuffer
-        // Buffer sizing might need to be dynamic depending on the spec of the device
-        // Will put us more at risk of underruns, chunk drops and recovery events via audibleSyncs
-        // The app will also be more sensitive to jitter, which can happen at anypoint on the audio pipeline
-        // Benefits to this would be a lower base output latency which will be good for responsiveness
+        // Capability values are diagnostic only. They do not change buffer sizing.
     }
 
     fun getDevicePreferredSampleRate(context: Context): Int {
@@ -929,12 +922,9 @@ class PcmAudioOutput {
     }
 
     /**
-     * Select the highest native PCM format by probing AudioTrack initialization.
-     * Preference order:
-     *  1) preferred sample rate first (when present in candidates)
-     *  2) higher sample rates
-     *  3) more channels
-     *  4) higher bit depth (32 -> 24 -> 16)
+     * Select a supported PCM format by probing AudioTrack initialization.
+     * Try the device's preferred sample rate first, then higher rates, more channels,
+     * and higher bit depths in that order.
      */
     fun selectHighestNativePcmFormat(
         context: Context,

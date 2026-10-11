@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
     private val writeStoragePermissionLauncher =
         registerForActivityResult(
             ActivityResultContracts.RequestPermission(),
-        ) { /* result handled implicitly — CrashReportingManager checks at write time */ }
+        ) { /* CrashReportingManager checks permission when writing. */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -482,7 +482,7 @@ private fun PlayerScreen(vm: PlayerViewModel) {
             )
         }
 
-        // Audio issue report — collecting/uploading progress indicator
+        // Progress while collecting or uploading an audio issue report.
         if (isCollectingAudioReport) {
             AlertDialog(
                 onDismissRequest = { /* non-dismissable while collecting */ },
@@ -500,7 +500,7 @@ private fun PlayerScreen(vm: PlayerViewModel) {
             )
         }
 
-        // Audio issue report — choose action dialog
+        // Choose how to submit the audio issue report.
         if (showAudioIssueDialog) {
             AlertDialog(
                 onDismissRequest = { showAudioIssueDialog = false },
@@ -569,7 +569,7 @@ private fun PlayerScreen(vm: PlayerViewModel) {
             )
         }
 
-        // Audio issue report — result dialog (shown after Sentry upload)
+        // Sentry upload result.
         if (showAudioIssueResultDialog) {
             AlertDialog(
                 onDismissRequest = { showAudioIssueResultDialog = false },
@@ -622,7 +622,7 @@ private fun PlayerScreen(vm: PlayerViewModel) {
             )
         }
 
-        // Crash report dialog — shown on startup when a crash was detected in the previous session
+        // Startup dialog for a crash in the previous session.
         if (showCrashReportDialog) {
             AlertDialog(
                 onDismissRequest = {

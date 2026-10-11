@@ -32,12 +32,11 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Drop-in replacement for the old Kotlin client, backed by the native sendspin-cpp library.
+ * Android wrapper for the native sendspin-cpp client.
  *
- * Kotlin keeps the Android shell concerns (foreground service, AudioTrack output, diagnostics UI)
- * while sendspin-cpp owns the protocol, time synchronization and audio scheduling. This class
- * implements [SendspinNativeCallbacks] to receive PCM and protocol events from the bridge and
- * exposes the same surface the service used for the old client.
+ * Owns AudioTrack output and publishes diagnostics and events for the service.
+ * sendspin-cpp handles the protocol, clock synchronization, and scheduling.
+ * [SendspinNativeCallbacks] receives PCM and protocol events from native threads.
  */
 class SendspinNativeClient(
     private val wsUrl: String,
@@ -75,7 +74,7 @@ class SendspinNativeClient(
     private val healthCheckIntervalMs = AppMemoryPolicy.healthCheckIntervalMs(leanDevice)
     private val cachedLabels = CachedDiagnosticLabels(context, tag)
 
-    // Native handle ownership. Access is guarded by handleLock; 0 means not created / destroyed.
+    // handleLock guards ownership. A zero handle means absent or destroyed.
     private val handleLock = Any()
 
     @Volatile
@@ -151,8 +150,7 @@ class SendspinNativeClient(
             Log.e(tag, "nativeCreate failed")
             return false
         }
-        // Native PlayerRole defaults volume=0 / muted=false. Apply any values that were set
-        // before the handle existed so the first post-handshake client/state is correct.
+        // Apply pending state before the first handshake response. Native defaults to volume 0.
         SendspinNative.nativeUpdateVolume(handle, pendingVolume)
         SendspinNative.nativeUpdateMuted(handle, pendingMuted)
         if (pendingStaticDelayMs > 0L) {
@@ -296,13 +294,13 @@ class SendspinNativeClient(
             val h = handle
             if (h != 0L) SendspinNative.nativeUpdateMuted(h, muted)
         }
-        // Mute via AudioTrack gain only — never silence system STREAM_MUSIC for other apps.
+        // Mute this AudioTrack without changing STREAM_MUSIC for other apps.
         output.setPlaybackMuted(muted)
         updateDiagnostics { it.copy(playerMuted = muted, playerMutedFromServer = false) }
     }
 
     /**
-     * Independent app software volume (0–1) via AudioTrack gain.
+     * App volume from 0 to 1, applied as AudioTrack gain.
      * Does not publish protocol player volume or change STREAM_MUSIC.
      */
     fun setAppVolumeGain(gain: Float) {
@@ -310,14 +308,14 @@ class SendspinNativeClient(
     }
 
     /**
-     * Temporary duck multiplier (0–1) via AudioTrack gain.
+     * Temporary duck multiplier from 0 to 1, applied as AudioTrack gain.
      * Does not publish protocol player volume or change STREAM_MUSIC.
      */
     fun setDuckGain(gain: Float) {
         output.setDuckGain(gain)
     }
 
-    /** Sends a transport command (play, pause, next, previous, stop, etc.) to the server. */
+    /** Sends a controller command to the server. */
     fun sendTransportCommand(command: String): Boolean {
         val sent =
             withHandle { h ->
@@ -332,8 +330,8 @@ class SendspinNativeClient(
     }
 
     /**
-     * Retained for API parity. sendspin-cpp exposes no runtime setter for the fixed pipeline
-     * delay; sync is driven by notify_audio_played feedback instead.
+     * Logs the request without applying it. sendspin-cpp has no runtime setter for fixed
+     * pipeline delay. Playback feedback drives synchronization instead.
      */
     fun setPlayoutOffsetAdjustmentMs(ms: Long) {
         Log.i(tag, "setPlayoutOffsetAdjustmentMs($ms) ignored: native sync owns playout offset")
@@ -529,7 +527,7 @@ class SendspinNativeClient(
         val diag = _diagnostics.value
         if (diag.playbackState != "playing" || !diag.connected) return
 
-        // Prevent race conditions during the initial stream start/AudioTrack initialization phase
+        // Allow the initial stream start one second before attempting output recovery.
         val now = System.currentTimeMillis()
         if (now - lastSuccessfulAudioWriteMs < 1000L) {
             return
@@ -691,8 +689,7 @@ class SendspinNativeClient(
     }
 
     override fun onMuteChanged(muted: Boolean) {
-        // Apply immediately on the output path so mute never depends on the service
-        // touching system STREAM_MUSIC (which would silence concurrent media apps).
+        // Apply mute directly to track gain. Changing STREAM_MUSIC would silence other apps.
         output.setPlaybackMuted(muted)
         _events.tryEmit(ClientEvent.ServerMutedChanged(muted))
         updateDiagnostics { it.copy(playerMuted = muted, playerMutedFromServer = true) }

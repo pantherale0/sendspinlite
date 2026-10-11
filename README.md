@@ -1,110 +1,102 @@
-# Sendspin Android Player
+# Sendspin Android player
 
-A basic Android client for [Sendspin](https://github.com/sendspin) that provides synchronized network audio playback. It connects to a Sendspin-compatible server (e.g., Home Assistant) over WebSocket, receives timestamped PCM audio frames, performs clock synchronization and jitter buffering, and plays audio in tight sync with other devices.
+An Android client for [Sendspin](https://github.com/sendspin). It connects to a Sendspin-compatible server over WebSocket and plays timestamped PCM audio in sync with other devices.
 
-This project is specially designed for low memory devices and a local network connection only. Connections via cellular will not be supported. The client is designed to offer only a Sendspin player.
+The app targets low-memory devices on local networks. Cellular connections are unsupported. Its main purpose is audio playback.
 
 ## Features
 
-### Core Playback
-- **Synchronized audio playback across network devices**
-  - Server-client clock alignment with drift estimation and real-time correction
-  - Timestamp-based playout with adjustable real-time offset for fine-tuning sync
-  - RTT-based network latency measurement
-  - Adaptive jitter buffering with late-frame detection and dropping
-  - Startup and restart catch-up logic to prevent buffer deadlock
+### Playback
 
-### Audio Codec Support
-- **PCM playback**
-  - Support for 16-bit, 24-bit, and 32-bit PCM output
-  - Configurable sample rates and channel counts
+- Server-client clock alignment with drift estimation and timing correction
+- Timestamp-based playout
+- Late-frame detection and dropping
+- Startup and restart catch-up
 
-### Discovery & Connection
-- **Automatic server discovery**
-  - mDNS service discovery (`_sendspin-server._tcp`)
-  - Manual URL entry fallback
-  - Persistence of server URL and connection settings
+### Audio formats
 
-### Diagnostics & Tuning
-- **Real-time diagnostics dashboard**
-  - Sync drift (ppm) and uncertainty measurements
-  - Network quality and stability assessment
-  - Connection type and RTT latency
-  - Buffer depth and late frame drops
-  - Audio pipeline latency monitoring
-  - Automatic playback speed adjustment (0.998x-1.002x) for buffer timing
-  - Memory usage monitoring for low-end devices
-  - Detailed stream information and state
+- 16-bit, 24-bit, and 32-bit PCM output
+- Configurable sample rates and channel counts
 
-### Automatic Timing Control
-- **Adaptive playback speed adjustment**
-  - Continuous buffer-ahead monitoring
-  - Proportional control to maintain target latency
-  - Automatic speed tuning (0.998x to 1.002x) without user intervention
-  - Dampened deadband to prevent audible artifacts
-  - Real-time latency and speed display
+### Discovery and connection
 
-### Reliability & Performance
-- **Background service support**
-  - Foreground service for persistent playback
-  - Wake lock management for sustained operation
-  - Boot completion receiver for auto-start
-  - Memory-aware operation for low-end devices
-  - Watchdog monitoring for connection stability
+- mDNS server discovery through `_sendspin-server._tcp`
+- Manual server URL entry
+- Saved server URL and connection settings
 
-### Audio Ducking & Intent API
-- **Independent App Volume & Software Ducking**
-  - Smooth coroutine-driven audio volume ducking (fade-in / fade-out) via local `AudioTrack` gain
-  - Independent of Android system master volume so external Voice Assistants (e.g. Home Assistant, Tasker, Rhasspy) remain crisp and clear
-  - Broadcast intent integration allowing external apps to duck, unduck, toggle, or adjust app volume dynamically
-  - Ducking does not publish temporary levels as protocol player volume
+### Diagnostics
 
-### Crash & ANR Reporting (opt-in)
-- **Privacy-first crash reporting**
-  - Detects hard crashes and App Not Responding (ANR) conditions
-  - On startup after a crash, the app prompts to send an anonymous report
-  - Reports are sent to [Sentry](https://sentry.io) only when the feature is explicitly enabled (opt-in)
-  - Toggle is available in the **Settings** section of the main screen
-  - No data is ever collected or transmitted unless opted-in
-  - Sentry is not used for anything other than reports for crashes/ANR or audio issues (triggered manually by pressing the dedicated button)
-  - Only available in builds where a Sentry DSN has been configured (see [Development](#development-status))
+- Clock uncertainty, network quality, and stability
+- Connection type
+- Audio output queue depth and pipeline latency
+- Memory usage
+- Stream format and playback state
 
-## Audio Ducking & Intent API Guide
+### Historical timing features
 
-SendSpin supports external volume ducking via Android Broadcast Intents. This allows Voice Assistants, Home Assistant Satellite devices, or Tasker to duck SendSpin's playback volume when listening or speaking without affecting system master volume or the Sendspin protocol player volume.
+The former Kotlin client adjusted playback speed between 0.998x and 1.002x to control buffer depth. Proportional control and a deadband limited repeated adjustments. Its diagnostics displayed speed, drift, RTT, and late drops.
 
-Ducking is applied as local `AudioTrack.setVolume` gain (composed with mute and soft-start), not by changing `STREAM_MUSIC`.
+Those descriptions predate the native client. The current integration uses playback feedback and native sample corrections. See [Native client integration](docs/NATIVE_CLIENT.md) for current diagnostics and documentation follow-up.
 
-**Requirement:** SendSpin's playback service must already be running (connected/playing). The duck receiver is registered dynamically while the service is alive so other apps can deliver custom broadcast actions.
+### Background playback
 
-**Recommended:** Target the SendSpin package when sending (`setPackage("com.sendspinlite")` / Tasker "Package" field / `adb -p com.sendspinlite`).
+- Foreground playback service
+- Wake locks during operation
+- Automatic startup after boot
+- Smaller memory budgets for low-memory devices
+- Connection watchdog and recovery
 
-### Supported Broadcast Intent Actions
+### App volume and ducking
+
+- App volume and temporary ducking through `AudioTrack` gain
+- Coroutine-driven volume ramps
+- Broadcast intents for external apps to duck, restore, toggle, or set app volume
+- Ducking leaves system volume and protocol player volume unchanged
+
+### Crash and ANR reporting
+
+Crash reports go to [Sentry](https://sentry.io) only when you enable reporting in **Settings**. On startup after a crash, the app prompts you to send a report.
+
+Reporting also covers application-not-responding events and manually submitted audio issues.
+
+The setting is available only in builds with a configured Sentry DSN. See [Build with crash reporting](#build-with-crash-reporting).
+
+## Use the ducking intent API
+
+Voice assistants, Home Assistant satellites, and Tasker can use Android broadcast intents to lower SendspinLite's playback volume while listening or speaking.
+
+Ducking uses `AudioTrack.setVolume`, combined with mute and the startup volume ramp. It leaves `STREAM_MUSIC` and protocol player volume unchanged.
+
+Start the playback service before sending an intent. The service registers the receiver for its lifetime.
+
+Target `com.sendspinlite` with `setPackage`, Tasker's **Package** field, or the ADB `-p` option.
+
+### Supported actions
 
 | Action | Purpose | Extras |
 |---|---|---|
-| `com.sendspinlite.ACTION_DUCK` | Ducks audio playback volume | `DUCK_PERCENT` (Int 0-100, default 20), `RAMP_MS` (Long, default 200), `DURATION_MS` (Long, optional auto-restore timeout) |
-| `com.sendspinlite.ACTION_UNDUCK` | Restores audio volume to normal | `RAMP_MS` (Long, default 400) |
-| `com.sendspinlite.ACTION_SET_APP_VOLUME` | Sets base app audio volume | `VOLUME` or `PERCENT` (Int 0-100) |
-| `com.sendspinlite.ACTION_TOGGLE_DUCK` | Toggles ducking state | `DUCK_PERCENT` (Int 0-100, default 20), `RAMP_MS` (Long, default 200) |
+| `com.sendspinlite.ACTION_DUCK` | Lower playback volume | `DUCK_PERCENT`: Int, 0-100, default 20; `RAMP_MS`: Long, default 200; optional `DURATION_MS`: Long, restore timeout |
+| `com.sendspinlite.ACTION_UNDUCK` | Restore playback volume | `RAMP_MS`: Long, default 400 |
+| `com.sendspinlite.ACTION_SET_APP_VOLUME` | Set base app volume | `VOLUME` or `PERCENT`: Int, 0-100 |
+| `com.sendspinlite.ACTION_TOGGLE_DUCK` | Toggle ducking | `DUCK_PERCENT`: Int, 0-100, default 20; `RAMP_MS`: Long, default 200 |
 
-### ADB Examples
+### ADB examples
 
 ```bash
-# Duck audio to 20% over 200ms (package-targeted)
+# Duck audio to 20% over 200 ms
 adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_DUCK --ei DUCK_PERCENT 20 --el RAMP_MS 200
 
-# Unduck audio back to 100% over 400ms
+# Restore the duck multiplier to 100% over 400 ms
 adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_UNDUCK --el RAMP_MS 400
 
-# Duck audio for a temporary 3-second duration
+# Duck audio for 3 seconds
 adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_DUCK --ei DUCK_PERCENT 15 --el DURATION_MS 3000
 
 # Set app software volume to 80%
 adb shell am broadcast -p com.sendspinlite -a com.sendspinlite.ACTION_SET_APP_VOLUME --ei VOLUME 80
 ```
 
-### From another app (Kotlin)
+### Send an intent from Kotlin
 
 ```kotlin
 val intent = Intent("com.sendspinlite.ACTION_DUCK").apply {
@@ -117,108 +109,105 @@ context.sendBroadcast(intent)
 
 ## Requirements
 
-- **Android**: API 24+ (Android 7.0 and later), in theory this could be dropped to 21, however this app relies on `AudioTrack` to play audio streams and a number of required sync features are unavailable prior to Android 7.0.
-- **Permissions**: 
+- Android 7.0 or later, API 24+. Earlier versions lack required AudioTrack synchronization support.
+- Permissions:
   - `INTERNET` - WebSocket communication
   - `MODIFY_AUDIO_SETTINGS` - Audio playback control
   - `WAKE_LOCK` - Prevent sleep during playback
   - `FOREGROUND_SERVICE` - Background audio service
-  - `POST_NOTIFICATIONS` - Playback notifications (Android 13+)
-  - `NEARBY_WIFI_DEVICES` - mDNS service discovery (Android 12+)
+  - `POST_NOTIFICATIONS` - Playback notifications on Android 13 or later
+  - `NEARBY_WIFI_DEVICES` - mDNS service discovery
   - `RECEIVE_BOOT_COMPLETED` - Auto-start on device boot
   - `ACCESS_NETWORK_STATE`, `CHANGE_NETWORK_STATE` - Network monitoring
-- **Server**: Sendspin-compatible server (e.g., Music Assistant)
+- A Sendspin-compatible server, such as Music Assistant
 
-## Getting Started
-
-### Basic Setup
+## Connect to a server
 
 1. Build and install the app on an Android device.
 2. Grant required permissions when prompted.
-3. The app will attempt automatic server discovery via mDNS.
-   - If discovery succeeds, the server URL is populated automatically.
-   - If discovery fails or times out, manually enter your server URL:
-     ```
-     ws://<host>:<port>/sendspin
-     ```
-4. Connect to the server.
-5. All configuration is performed server side.
+3. Wait for mDNS discovery to fill in the server URL. If discovery fails, enter the URL:
+   ```text
+   ws://<host>:<port>/sendspin
+   ```
+4. Connect to the server. The server controls the stream configuration.
+
 ## Architecture
 
-### Core Components
+### Components
 
-- **SendspinService**
+- `SendspinService`
   - Background service managing WebSocket connection lifecycle
   - Runs as foreground service with media playback notifications
   - Handles connection persistence and recovery
 
-- **SendspinNativeClient / SendspinNative (JNI)**
+- `SendspinNativeClient` and `SendspinNative`
   - Kotlin wrapper around the native [sendspin-cpp](https://github.com/Sendspin/sendspin-cpp) client
   - sendspin-cpp owns the WebSocket protocol, clock synchronization and playout scheduling
   - Drives the `AudioTrack` output and reports playback progress to the native sync task
   - See [docs/NATIVE_CLIENT.md](docs/NATIVE_CLIENT.md)
 
-- **PcmAudioOutput**
-  - AndroidX AudioTrack wrapper
-  - Multi-bit-depth support (16/24/32-bit)
+- `PcmAudioOutput`
+  - Android AudioTrack wrapper
+  - 16-bit, 24-bit, and 32-bit PCM support
   - Implements the `on_audio_write` contract and reports presented frames via `getPlaybackProgress()`
   - Pipeline latency estimation with smoothing
   - Buffer management for low-latency playback
 
-- **ServiceDiscovery**
+- `ServiceDiscovery`
   - mDNS service discovery using Android NSD Manager
   - Automatic server detection on local network
 
-- **PlayerViewModel / MainActivity**
+- `PlayerViewModel` and `MainActivity`
   - Jetpack Compose UI state management
   - User preference persistence
   - Real-time diagnostics streaming
 
-## Protocol Overview
+## Implemented protocol
 
-### Binary Audio Frames
+The packet descriptions below refer to the implemented protocol. They are not a claim of conformance with the latest spec.
+
+### Binary audio frames
+
 - Type: `0x04`
-- 8-byte big-endian server timestamp (microseconds)
+- 8-byte big-endian server timestamp in microseconds
 - Followed by PCM audio payload
 
-### JSON Control Messages
-- **Handshake**: `client/hello`, `server/hello`
-- **Time Sync**: `client/time`, `server/time`
-- **Stream Lifecycle**: `stream/start`, `stream/end`
+### JSON control messages
 
-## Spec Conformance
+- Handshake uses `client/hello` and `server/hello`.
+- Clock synchronization uses `client/time` and `server/time`.
+- Stream lifecycle uses `stream/start`, `stream/clear`, and `stream/end`.
 
-- Checklist: [docs/SPEC_CONFORMANCE.md](docs/SPEC_CONFORMANCE.md)
+## Spec conformance
+
+- Historical checklist and review notes: [Spec conformance](docs/SPEC_CONFORMANCE.md)
 - Spec reference: [sendspin/spec](https://github.com/sendspin/spec)
 
-## Development Status
+## Development status
 
-This project is **stable**. Contributions and bug reports are welcome.
+The project is stable. Contributions and bug reports are welcome.
 
-### Reporting Audio / Playback Issues
+### Report an audio issue
 
-Tap the **bug-report icon** (🐛) next to the app title to open the audio issue reporter.
-It collects a privacy-redacted diagnostics snapshot that includes:
+Tap the bug-report icon next to the app title to open the audio issue reporter. The report includes:
 
-- Audio configuration (codec, static delay, playback speed)
-- Audio pipeline statistics (latency, drift, RTT, buffer, sync counts)
-- Network quality metrics (connection type, stability)
+- Audio configuration, including codec and static delay
+- Audio pipeline statistics, including latency and buffer depth
+- Network quality, connection type, and stability
 - Recent logcat lines filtered to Sendspin and Android audio subsystem tags only
 
-**Personal data is intentionally excluded**: server addresses, client/group names, and all track metadata (title, artist, album, etc.) are never collected.
+The report excludes server addresses, client and group names, and track metadata.
 
 Two reporting options are offered:
 
 | Option | When available | Notes |
 |--------|----------------|-------|
-| **Upload to Sentry** | Crash & ANR reporting enabled in Settings | Returns a unique event ID to include in GitHub issues |
-| **Save to File** | Always | System file picker lets you choose where to save the `.txt` report |
+| Upload to Sentry | Crash and ANR reporting enabled in Settings | Returns an event ID to include in your GitHub issue |
+| Save to file | Always | Opens the system file picker to save the `.txt` report |
 
-### Building from Source
+### Build from source
 
-The native client lives in the `sendspin-cpp` git submodule and is compiled with the Android NDK,
-so initialise submodules and install the native toolchain (NDK `27.0.12077973`, CMake `3.22.1`)
-before building:
+Install NDK `27.0.12077973` and CMake `3.22.1`. Initialize the submodules, then build:
 
 ```bash
 git submodule update --init --recursive
@@ -227,18 +216,15 @@ git submodule update --init --recursive
 
 See [docs/NATIVE_CLIENT.md](docs/NATIVE_CLIENT.md) for details.
 
-### Building with Crash Reporting
+### Build with crash reporting
 
-Crash and ANR reporting via Sentry is **disabled by default** and only activates when:
-1. The build is compiled with a valid Sentry DSN, **and**
-2. The user explicitly enables the feature in the app's Settings section.
+Sentry reporting requires both a valid DSN in the build and the user's consent in **Settings**.
 
-To enable crash reporting in your own build, set the `SENTRY_DSN` environment variable before building:
+Set `SENTRY_DSN` before building:
+
 ```bash
 export SENTRY_DSN="https://<key>@<org>.ingest.sentry.io/<project>"
 ./gradlew assembleRelease
 ```
 
-Without this variable the feature is unavailable (the toggle in Settings will be disabled). Official release builds published by this project include a configured DSN.
-
----
+Without a DSN, the reporting toggle is disabled. Official release builds include a configured DSN.

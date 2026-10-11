@@ -1,8 +1,8 @@
 package com.sendspinlite.playback
 
 /**
- * Playback recovery / pipeline status strings used in UI, logs, and audio issue reports.
- * Keep values stable — they are compared in reports and may appear in Sentry extras.
+ * Playback status strings for the UI, logs, and issue reports.
+ * Keep values stable because reports compare them and Sentry stores them as extras.
  */
 object PlaybackDiagnostics {
     const val CLOCK_CONVERGED_MIN_UPDATES = 15
@@ -29,13 +29,13 @@ object PlaybackDiagnostics {
     const val STATUS_UNDERRUN = "buffer_underrun"
     const val STATUS_STARVATION_RECONNECT = "starvation_reconnect"
 
-    /** No PCM written for this long while playing → force reconnect. */
+    /** Reconnect after this interval without PCM writes during playback. */
     const val STARVATION_NO_WRITE_MS = 1_200L
 
-    /** Shorter threshold after the OS signals the link is degrading (e.g. Wi-Fi roam). */
+    /** Shorter write-stall threshold when the OS reports a degrading network link. */
     const val STARVATION_NO_WRITE_DEGRADED_MS = 700L
 
-    /** Connected WebSocket but no inbound audio for this long → likely wedged TCP after roam. */
+    /** Write-stall threshold for a connected socket, which may have stalled after a roam. */
     const val STARVATION_CONNECTED_STALL_MS = 1_800L
 
     /** Output queue at or below this level is considered nearly empty. */

@@ -96,17 +96,13 @@ class SendspinService : Service() {
     private var reconnectJob: Job? = null
     private var reconnectRetryCount = 0
 
-    // Unlimited reconnection attempts - will keep retrying until manually disconnected
+    // Retry until the user disconnects.
     private var connectingStartedAtMs: Long = 0L
     private var connectWatchdogJob: Job? = null
 
-    // Per-connection flow collectors. These MUST be cancelled on every disconnect/reconnect,
-    // otherwise each connect() leaks two coroutines that keep the previous SendspinNativeClient
-    // (and its buffers/audio output) reachable forever. Relying solely on a takeWhile() guard
-    // is insufficient: once `client` is reassigned the old client's flows stop emitting, so the
-    // guard never re-evaluates and the collector stays suspended, pinning the dead client in
-    // memory. Under the boot path (background service, repeated health-recovery reconnects) this
-    // accumulates until the heap is exhausted (OOM).
+    // Cancel both collectors before replacing the client. takeWhile cannot release the old
+    // client if its flows stop emitting. Suspended collectors retain its buffers and output,
+    // so repeated reconnects can exhaust the heap.
     private var diagnosticsJob: Job? = null
     private var eventsJob: Job? = null
 
@@ -167,7 +163,7 @@ class SendspinService : Service() {
     @Volatile
     private var isDucked: Boolean = false
 
-    /** Independent app software volume (0–100); composed into AudioTrack gain. */
+    /** App volume from 0 to 100, applied through AudioTrack gain. */
     @Volatile
     private var unDuckedBaseVolume: Int = 100
 
@@ -295,9 +291,8 @@ class SendspinService : Service() {
         memoryTrimCallback = createMemoryTrimCallback()
         registerComponentCallbacks(memoryTrimCallback)
 
-        // Duck/unduck intents from other apps (HA, Tasker, etc.) require a context-registered
-        // exported receiver — manifest registration alone does not receive custom implicit
-        // broadcasts on modern targetSdk.
+        // External ducking intents need a context-registered, exported receiver.
+        // Modern Android restricts custom implicit broadcasts to manifest receivers.
         registerIntentReceiver()
     }
 
@@ -488,7 +483,7 @@ class SendspinService : Service() {
             connect(wsUrl, clientId, clientName, fromBoot = fromBoot)
         }
 
-        // START_STICKY ensures system restarts service if it's killed
+        // START_STICKY requests a service restart after process termination.
         return START_STICKY
     }
 
@@ -844,8 +839,8 @@ class SendspinService : Service() {
         activeClient.onReleaseHighPerformance = {
             wifiLock?.let { if (it.isHeld) it.release() }
         }
-        // Refresh STREAM_MUSIC now — stale uiState volume (or a prior server echo of 0) must not
-        // be what we push on the first client/state after connect/reconnect.
+        // Read STREAM_MUSIC before publishing initial state. Cached UI volume may be stale
+        // or still contain a previous server echo of zero.
         val currentVolume = getSystemMediaVolume()
         _uiState.value =
             _uiState.value.copy(
@@ -911,7 +906,7 @@ class SendspinService : Service() {
             }
             is ClientEvent.ServerMutedChanged -> {
                 // Mute already applied as AudioTrack gain in SendspinNativeClient.onMuteChanged.
-                // Do not touch STREAM_MUSIC — that would silence concurrent media apps.
+                // Changing STREAM_MUSIC would silence concurrent media apps.
                 Log.i(tag, "Server mute reflected in UI: muted=${event.muted}")
                 markServerVolumeSet()
 
@@ -1213,7 +1208,7 @@ class SendspinService : Service() {
         client?.setStaticDelayMs(clamped)
     }
 
-    // Player (local device) volume controls — protocol / STREAM_MUSIC sync only.
+    // Player volume controls synchronize protocol state with STREAM_MUSIC.
     fun setPlayerVolume(volume: Int) {
         client?.setPlayerVolume(volume)
     }
@@ -1266,8 +1261,8 @@ class SendspinService : Service() {
     }
 
     /**
-     * Set independent app software volume (0–100). Applied as AudioTrack gain;
-     * does not change protocol player volume or system STREAM_MUSIC.
+     * Set app volume from 0 to 100 through AudioTrack gain.
+     * Does not change protocol player volume or system STREAM_MUSIC.
      */
     fun setAppVolume(volume: Int) {
         unDuckedBaseVolume = volume.coerceIn(0, 100)
@@ -1819,8 +1814,7 @@ class SendspinService : Service() {
     }
 
     /**
-     * Health monitoring - ensures client thread never gets stuck
-     * Checks playback loop health every 5 seconds and triggers recovery if hung
+     * Checks client health every 5 seconds and requests recovery when the check fails.
      */
     private var healthMonitorJob: Job? = null
 

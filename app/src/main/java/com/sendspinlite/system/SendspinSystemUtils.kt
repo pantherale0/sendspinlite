@@ -12,7 +12,7 @@ import android.util.Log
 import com.sendspinlite.BuildConfig
 
 object SendspinSystemUtils {
-    /** Devices with less than 2 GB total RAM — use lean buffers and reduced UI features. */
+    /** Total-RAM check used to select lean buffers and fewer UI features. */
     fun checkIsLowMemoryDevice(
         context: Context,
         tag: String,

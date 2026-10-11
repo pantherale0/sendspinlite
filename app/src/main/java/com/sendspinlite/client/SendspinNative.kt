@@ -3,10 +3,9 @@ package com.sendspinlite.client
 import java.nio.ByteBuffer
 
 /**
- * Callbacks invoked by the native sendspin-cpp bridge (libsendspin_jni). Implemented by
- * [SendspinNativeClient]. Audio callbacks fire on the native sync-task thread; all others fire
- * on the native main-loop thread. Implementations must be thread-safe and non-blocking beyond
- * the documented audio write timeout.
+ * Native bridge callbacks implemented by [SendspinNativeClient]. Audio callbacks run on the
+ * native sync thread. Other callbacks run on the native main-loop thread. Implementations must
+ * be thread-safe and may block only within the audio write timeout.
  */
 internal interface SendspinNativeCallbacks {
     /** Writes decoded PCM to the platform output, returning the number of bytes written. */
@@ -30,7 +29,7 @@ internal interface SendspinNativeCallbacks {
 
     fun onStaticDelayChanged(delayMs: Int)
 
-    /** Optional fields use null (strings) or -1 (numbers) to mark absent values. */
+    /** Absent fields use null for strings and -1 for numbers. */
     fun onMetadataUpdate(
         title: String?,
         artist: String?,
@@ -76,9 +75,8 @@ internal interface SendspinNativeCallbacks {
 }
 
 /**
- * Thin JNI loader exposing the sendspin-cpp client lifecycle. All methods operate on an opaque
- * native handle returned by [nativeCreate]; the caller owns the handle and must call
- * [nativeDestroy] exactly once.
+ * JNI methods for the sendspin-cpp client. The caller owns each handle returned by
+ * [nativeCreate] and must call [nativeDestroy] exactly once for that handle.
  */
 internal object SendspinNative {
     init {
@@ -151,7 +149,7 @@ internal object SendspinNative {
 
     external fun nativeGetTrackDurationMs(handle: Long): Int
 
-    /** Monotonic time in microseconds (sendspin-cpp steady_clock / platform_time_us domain). */
+    /** Microseconds in sendspin-cpp's steady_clock domain, matching platform_time_us. */
     external fun nativeMonotonicTimeUs(): Long
 
     /** Goodbye reason ordinals, matching sendspin::SendspinGoodbyeReason. */

@@ -186,12 +186,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 service?.let { svc ->
                     viewModelScope.launch {
                         svc.uiState.collect { serviceState ->
-                            // Volume and mute changes are now handled directly in the service
-                            // This ensures they work even when the app UI is not open (e.g., after boot)
-                            // Just update the UI state to reflect current state
+                            // The service handles volume and mute even when the UI is closed.
+                            // Mirror its state here.
 
-                            // Only update player volume from service if it's from the server
-                            // This prevents service state from overwriting local UI volume
+                            // Preserve local UI volume unless the service reports a server change
+                            // or the UI still has its default volume.
                             if (serviceState.playerVolumeFromServer || _ui.value.playerVolume == 100) {
                                 _ui.value = serviceState
                             } else {
@@ -239,7 +238,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         // Set a 5-second timeout for discovery
         viewModelScope.launch {
             kotlinx.coroutines.delay(5000) // 5 seconds
-            // Mark that discovery timeout has expired (this allows fallback to manual entry)
+            // Allow manual URL entry after the discovery timeout.
             _ui.value = _ui.value.copy(discoveryTimeoutExpired = true)
         }
 

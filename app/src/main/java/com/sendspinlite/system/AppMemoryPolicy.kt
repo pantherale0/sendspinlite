@@ -3,14 +3,14 @@ package com.sendspinlite.system
 import android.content.Context
 
 /**
- * Central memory budget for kiosk / low-RAM targets (e.g. Echo Show class devices).
- * Prefer querying [isLeanDevice] once per component lifetime rather than hard-coding sizes.
+ * Buffer sizes and polling intervals for low-memory devices.
+ * Query [isLeanDevice] once per component lifetime.
  */
 object AppMemoryPolicy {
-    /** Native encoded-audio ring buffer when memory is plentiful (~2 MB). */
+    /** Default native encoded-audio ring-buffer capacity in bytes. */
     const val RING_BUFFER_BYTES_DEFAULT = 2_000_000L
 
-    /** Lean ring buffer (~375 KB) — enough for network jitter without pinning multi-MB RSS. */
+    /** Native ring-buffer capacity in bytes for lean devices. */
     const val RING_BUFFER_BYTES_LEAN = 384_000L
 
     const val DIAGNOSTICS_INTERVAL_MS_DEFAULT = 250L

@@ -1,13 +1,13 @@
 package com.sendspinlite.playback
 
 /**
- * Pure rules for detecting playback starvation (e.g. Wi-Fi roam stalls the WebSocket while
- * AudioTrack drains). Kept separate from Android I/O so it can be unit-tested.
+ * Playback-starvation rules without Android I/O. A Wi-Fi roam can stall the WebSocket
+ * while AudioTrack drains.
  */
 object PlaybackHealthRules {
     /**
-     * Returns true when the output queue is nearly empty and no PCM has arrived recently —
-     * typical just before AudioFlinger BUFFER TIMEOUT during a network stall.
+     * Returns true when the output queue is nearly empty and PCM writes have stalled.
+     * This can precede AudioFlinger BUFFER TIMEOUT during a network stall.
      */
     fun isOutputQueueCriticallyLow(
         outputQueueMs: Long,
@@ -17,7 +17,7 @@ object PlaybackHealthRules {
             msSinceLastWrite >= PlaybackDiagnostics.STARVATION_LOW_BUFFER_GRACE_MS
 
     /**
-     * Returns true when playback should be treated as starved and a reconnect is warranted.
+     * Returns true when a playback stall warrants a reconnect.
      */
     fun shouldReportStarvation(
         playbackState: String,

@@ -7,14 +7,14 @@ assignees: ''
 
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+### Problem
+Describe the task you cannot complete or the behavior you want to improve.
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+### Proposed change
+Describe what you want the app to do.
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+### Alternatives
+Describe any alternatives you considered or workarounds you use.
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+### Additional context
+Include examples or screenshots that explain the request.

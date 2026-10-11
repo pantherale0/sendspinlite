@@ -1,11 +1,10 @@
 # CMake build for the SendSpin Android JNI bridge.
 #
-# Builds the sendspin-cpp library (host networking path, IXWebSocket) for Android
-# and wraps it in libsendspin_jni.so, which the Kotlin layer loads via System.loadLibrary.
+# Builds sendspin-cpp with IXWebSocket for Android and links it into libsendspin_jni.so.
+# Kotlin loads the bridge with System.loadLibrary.
 #
-# sendspin-cpp has no dedicated Android target; the host CMake path compiles cleanly
-# under the NDK because it relies only on POSIX sockets, std threads and FetchContent
-# dependencies (ArduinoJson, micro-flac, micro-opus, IXWebSocket).
+# The host build uses POSIX sockets and standard threads under the NDK.
+# FetchContent supplies ArduinoJson, micro-flac, micro-opus, and IXWebSocket.
 
 cmake_minimum_required(VERSION 3.22.1)
 project(sendspin_jni LANGUAGES C CXX)
@@ -22,8 +21,7 @@ if(NOT EXISTS "${SENDSPIN_CPP_DIR}/CMakeLists.txt")
         "Run: git submodule update --init --recursive")
 endif()
 
-# Role selection: player (audio) + metadata (track info) only. Everything else off to
-# keep the native binary small and avoid pulling unused codec/UI dependencies.
+# Enable player, metadata, and controller roles. Disable unused roles.
 set(SENDSPIN_ENABLE_PLAYER ON CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_METADATA ON CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_CONTROLLER ON CACHE BOOL "" FORCE)
@@ -31,13 +29,13 @@ set(SENDSPIN_ENABLE_COLOR OFF CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_ARTWORK OFF CACHE BOOL "" FORCE)
 set(SENDSPIN_ENABLE_VISUALIZER OFF CACHE BOOL "" FORCE)
 
-# Never build the host examples (FTXUI/PortAudio) or tests inside the app build.
+# Exclude host examples and native tests from the app build.
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SENDSPIN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ENABLE_WERROR OFF CACHE BOOL "" FORCE)
 set(ENABLE_SANITIZERS OFF CACHE BOOL "" FORCE)
 
-# IXWebSocket: no TLS / zlib (matches cleartext ws:// usage; avoids OpenSSL on NDK).
+# Cleartext ws:// transport needs neither TLS nor zlib.
 set(USE_TLS OFF CACHE BOOL "" FORCE)
 set(USE_ZLIB OFF CACHE BOOL "" FORCE)
 

@@ -21,7 +21,7 @@ android {
         versionName = "1.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Sentry DSN — set via environment variable SENTRY_DSN or leave empty to disable crash reporting
+        // Set SENTRY_DSN to include crash reporting in the build.
         buildConfigField("String", "SENTRY_DSN", "\"${System.getenv("SENTRY_DSN") ?: ""}\"")
 
         externalNativeBuild {
@@ -97,10 +97,10 @@ dependencies {
     // Core 1.9.0+ has ashmem pinning fixes and supports API 24+
     implementation("androidx.core:core-ktx:1.9.0")
 
-    // Activity Compose 1.7.0+ supports API 24+ and works with compileSdk 31
+    // Activity Compose 1.7.0 supports API 24+.
     implementation("androidx.activity:activity-compose:1.7.0")
 
-    // Compose 1.0.x is the most stable for API 24+
+    // Compose version used for API 24+ compatibility.
     implementation("androidx.compose.ui:ui:1.0.5")
     implementation("androidx.compose.ui:ui-tooling-preview:1.0.5")
     implementation("androidx.compose.material:material:1.0.5")
@@ -113,10 +113,10 @@ dependencies {
     // JSON library supports API 24+
     implementation("org.json:json:20231013")
 
-    // Sentry Android SDK — opt-in crash and ANR reporting
+    // Opt-in crash and ANR reporting.
     implementation("io.sentry:sentry-android:8.14.0")
 
-    // Currently supporting: PCM
+    // The native player advertises PCM only.
 
     // androidx.media 1.6.0+ has ashmem pinning fixes and supports API 14+
     implementation("androidx.media:media:1.6.0")

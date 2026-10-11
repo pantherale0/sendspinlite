@@ -9,9 +9,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Exercises the native client lifecycle against the real libsendspin_jni on-device: create the
- * native client, read its initial diagnostics, then destroy it. Verifies the JNI bridge loads
- * and the create/destroy path does not crash.
+ * Constructs the Android client wrapper, checks initial diagnostics, and releases resources.
+ * This test does not connect, so it does not exercise native handle creation.
  */
 @RunWith(AndroidJUnit4::class)
 class SendspinNativeClientTest {

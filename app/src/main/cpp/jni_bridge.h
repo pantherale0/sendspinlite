@@ -1,7 +1,7 @@
 // Shared declarations for the SendSpin Android JNI bridge.
 //
-// The bridge wraps a sendspin::SendspinClient (player + metadata + controller roles) and forwards
-// protocol/audio events to a Kotlin SendspinNativeCallbacks object via JNI.
+// The bridge owns player, metadata, and controller roles and forwards their events
+// to Kotlin through SendspinNativeCallbacks.
 
 #pragma once
 
@@ -23,8 +23,7 @@ namespace sendspin_jni {
 extern JavaVM* g_vm;
 
 // Returns a JNIEnv for the calling thread, attaching it to the JVM if needed.
-// Native threads created by sendspin-cpp (sync task) are auto-detached at thread
-// exit via a thread_local guard, so callers must not detach manually.
+// A thread_local guard detaches native threads at exit. Callers must not detach them.
 JNIEnv* GetEnv();
 
 // Cached jmethodIDs for the Kotlin SendspinNativeCallbacks interface.
@@ -54,9 +53,8 @@ class AndroidControllerListener;
 class AndroidClientListener;
 class AndroidNetworkProvider;
 
-// Owns the native client, its roles, listeners and the main-loop thread.
-// Created in nativeCreate and destroyed in nativeDestroy. The Kotlin callbacks
-// object is held as a global ref for the lifetime of the handle.
+// Owns the client, roles, listeners, and main-loop thread between nativeCreate
+// and nativeDestroy. A JNI global reference retains the Kotlin callbacks object.
 class ClientHandle {
 public:
     ClientHandle(JNIEnv* env, jobject callbacks, sendspin::SendspinClientConfig config,

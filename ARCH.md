@@ -1,20 +1,17 @@
-# SendSpin Android Player - Architecture & Developer Documentation
+# Sendspin Android player architecture
 
-Welcome to the official developer and architecture documentation for the **SendSpin PCM Player Android Application**. 
+SendspinLite uses Kotlin for the Android service, UI, and audio output, and sendspin-cpp for the protocol and playback scheduler.
 
-This document provides a deep, granular look into the system's design, the mathematics governing our time-synchronization engine, the audio playout scheduler pipeline, and practical guidelines for developers working on the codebase.
+The timing equations and historical sections below came from the former Kotlin client and need a factual review against the native implementation. The offset formula also uses a different sign from the state-vector definition. See [Native client integration](docs/NATIVE_CLIENT.md) for the current integration and its review notes.
 
----
+## Packages
 
-## 🏛️ 1. Architecture & Package Structure
+The app's Kotlin packages use the `com.sendspinlite` namespace. A JNI bridge connects them to the [sendspin-cpp](https://github.com/Sendspin/sendspin-cpp) submodule, which handles the protocol, clock synchronization, and audio scheduling.
 
-The application is structured around a highly decoupled, modular **Component-Module Package Architecture** under the `com.sendspinlite` namespace. As of the native-client migration, the protocol, time synchronization and audio scheduling are owned by the [sendspin-cpp](https://github.com/Sendspin/sendspin-cpp) library (a git submodule) reached through a thin JNI bridge. Kotlin retains the Android shell: foreground service, mDNS discovery, Compose UI, `AudioTrack` output and diagnostics. See [docs/NATIVE_CLIENT.md](docs/NATIVE_CLIENT.md) for the native integration details.
-
-### Architectural Package Map
+### Package dependencies
 
 ```mermaid
 graph TD
-    %% Define Nodes
     Root[com.sendspinlite - Application Root]
     UI[com.sendspinlite.ui - UI/Compose & ViewModels]
     Service[com.sendspinlite.service - Foreground Player Service]
@@ -26,7 +23,6 @@ graph TD
     Diag[com.sendspinlite.diagnostics - Telemetry & Issue Reports]
     Sys[com.sendspinlite.system - OS Flags, Battery & Receivers]
 
-    %% Package Connections
     UI --> Service
     Service --> Client
     Client --> Jni
@@ -40,49 +36,48 @@ graph TD
     Root --> Sys
 ```
 
-### Component Directory Layout
+### Components
 
-- **`com.sendspinlite` (Root)**:
-  - `SendspinApplication.kt`: Application entry-point; configures dependency baselines and triggers background crash reporting services.
-- **`com.sendspinlite.ui`**:
-  - `MainActivity.kt`: Contains Compose layout screens (volume controls, server state charts, network telemetries, log dumps).
-  - `PlayerViewModel.kt`: Intermediates between the frontend UI and the background foreground service.
-- **`com.sendspinlite.service`**:
-  - `SendspinService.kt`: Run as an Android foreground service with a persistent status notification to ensure the OS does not terminate active audio playout when the app is in the background. Wires native high-performance requests to the WiFi lock. Implements software audio volume ducking (coroutine-driven volume ramping via local `AudioTrack` gain) independently of system master volume and protocol player volume.
-  - `SendspinIntentReceiver.kt`: Context-registered exported `BroadcastReceiver` (registered while `SendspinService` is alive) that forwards external broadcast intents (`com.sendspinlite.ACTION_DUCK`, `com.sendspinlite.ACTION_UNDUCK`, `com.sendspinlite.ACTION_SET_APP_VOLUME`, `com.sendspinlite.ACTION_TOGGLE_DUCK`) into the service for Voice Assistants (e.g. Home Assistant, Tasker). Manifest-only registration is not used because custom implicit broadcasts are blocked on modern `targetSdk`.
-- **`com.sendspinlite.client`**:
-  - `SendspinNativeClient.kt`: Kotlin wrapper around the native client; owns the `AudioTrack` output, exposes the diagnostics/events surface the service consumes, and feeds playback progress back to the native sync task.
-  - `SendspinNative.kt`: Thin JNI loader exposing the native lifecycle (`nativeCreate`/`nativeStart`/`nativeConnect`/...) plus the `SendspinNativeCallbacks` interface invoked from native threads.
-  - `ClientState.kt`: Decoupled dataclasses representing UI telemetry diagnostics (`ClientDiagnostics`) and outbound server events (`ClientEvent`).
-- **`app/src/main/cpp`** (native JNI bridge, built via CMake/NDK into `libsendspin_jni.so`):
-  - `jni_onload.cpp`: Captures the `JavaVM` and attaches/detaches native threads to the JVM.
-  - `sendspin_client_handle.{h,cpp}`: Owns the `SendspinClient`, player + metadata roles, listeners and the main-loop thread; defines the JNI entry points.
-  - `android_player_listener.cpp` / `android_metadata_listener.cpp` / `android_client_listener.cpp` / `android_network_provider.cpp`: Forward sendspin-cpp callbacks to Kotlin.
-- **`com.sendspinlite.playback`**:
-  - `PcmAudioOutput.kt`: Low-level wrapper of Android's `AudioTrack` class. Implements the `on_audio_write` contract (`writePcm(ByteBuffer, …)`) and reports presented frames via `getPlaybackProgress()`. Composes soft-start, mute, app volume, and duck multipliers into `AudioTrack.setVolume`.
-  - `PcmFormatSupport.kt`: Probes which PCM sample-rate/channel/bit-depth combinations the device supports.
-  - `PlaybackDiagnostics.kt`: Constants representing active playout recovery states.
-  - `SendspinAudioWarmup.kt`: Silent PCM format warmup checks used to estimate baseline device pipeline delay.
-- **`com.sendspinlite.network`**:
-  - `ServiceDiscovery.kt`: Leverages Android's Network Service Discovery (NSD) to resolve `_sendspin-server._tcp.local` servers via mDNS.
-  - `PortChecker.kt`: Fast background socket verification tool used to verify server availability before connecting.
-- **`com.sendspinlite.diagnostics`**:
-  - `AudioIssueReporter.kt`: Gathers system telemetries and bundles anonymized playout logs for Sentry diagnostic dumps.
-  - `CrashReportingManager.kt` / `ReportingUtils.kt`: Local files used to store unhandled application crash events.
-- **`com.sendspinlite.system`**:
-  - `SendspinSystemUtils.kt`: Gathers connection interfaces (Ethernet vs WiFi), device memories, and system media stream volumes.
-  - `BootReceiver.kt`: Re-registers foreground services upon system reboot.
+- `com.sendspinlite`
+  - `SendspinApplication.kt` initializes the app and crash reporting.
+- `com.sendspinlite.ui`
+  - `MainActivity.kt` displays volume controls, server state, network diagnostics, and logs with Compose.
+  - `PlayerViewModel.kt` connects the UI to the playback service.
+- `com.sendspinlite.service`
+  - `SendspinService.kt` runs playback as a foreground service with a persistent notification. It handles Wi-Fi lock requests and app-volume ramps.
+  - `SendspinIntentReceiver.kt` forwards ducking and app-volume broadcasts from external apps. The service registers this exported receiver for its lifetime because modern Android restricts custom implicit broadcasts to manifest receivers.
+- `com.sendspinlite.client`
+  - `SendspinNativeClient.kt` owns audio output, publishes diagnostics and events, and reports playback progress to native code.
+  - `SendspinNative.kt` exposes native lifecycle methods and the `SendspinNativeCallbacks` interface.
+  - `ClientState.kt` defines `ClientDiagnostics` and `ClientEvent`.
+- `app/src/main/cpp`
+  - CMake and the NDK build the JNI bridge as `libsendspin_jni.so`.
+  - `jni_onload.cpp` captures the `JavaVM` and attaches native threads to the JVM.
+  - `sendspin_client_handle.cpp` owns the native client, roles, listeners, and main-loop thread. `jni_bridge.h` declares the handle and JNI helpers.
+  - The Android listeners and network provider forward native callbacks to Kotlin.
+- `com.sendspinlite.playback`
+  - `PcmAudioOutput.kt` writes PCM to Android's `AudioTrack` and reports presented frames through `getPlaybackProgress()`. It combines the startup ramp, mute, app volume, and duck multiplier into track gain.
+  - `PcmFormatSupport.kt` probes sample-rate, channel-count, and bit-depth support.
+  - `PlaybackDiagnostics.kt` defines recovery-state constants.
+  - `SendspinAudioWarmup.kt` estimates pipeline delay with silent PCM.
+- `com.sendspinlite.network`
+  - `ServiceDiscovery.kt` resolves `_sendspin-server._tcp.local` servers through Android Network Service Discovery.
+  - `PortChecker.kt` checks the server port before connecting.
+- `com.sendspinlite.diagnostics`
+  - `AudioIssueReporter.kt` collects system diagnostics and redacted playback logs.
+  - `CrashReportingManager.kt` and `ReportingUtils.kt` handle crash reports.
+- `com.sendspinlite.system`
+  - `SendspinSystemUtils.kt` reads network, memory, and media-volume information.
+  - `BootReceiver.kt` starts the service after reboot.
 
----
+## Audio synchronization
 
-## ⚡ 2. Audio Synchronization Engine
+The scheduler aligns audio from multiple devices to the server's timestamps.
 
-The primary design constraint of the Sendspin protocol is maintaining **microsecond-level timing sync** across multiple physical client devices playing the same audio stream.
-
-> **Native ownership.** Since the native-client migration, the WebSocket protocol, NTP-style clock synchronization (Kalman filter), audio decoding and playout scheduling are implemented inside [sendspin-cpp](https://github.com/Sendspin/sendspin-cpp), not in Kotlin. The sections below describe the algorithm the native sync task runs. The Android side only delivers decoded PCM to `AudioTrack` and reports playback progress back to the native sync task. See [docs/NATIVE_CLIENT.md](docs/NATIVE_CLIENT.md).
+sendspin-cpp handles WebSocket messages, clock synchronization, decoding, and scheduling. Kotlin writes PCM to AudioTrack and reports playback progress.
 
 ```
-       [WebSocket Frame — IXWebSocket, inside sendspin-cpp]
+       [WebSocket frame via IXWebSocket in sendspin-cpp]
                │
                ▼
    [sendspin-cpp protocol + audio ring buffer]
@@ -96,11 +91,11 @@ The primary design constraint of the Sendspin protocol is maintaining **microsec
    [notify_audio_played] ◄── frames presented + finish timestamp
 ```
 
-### 1. Clock Synchronization Math (Kalman Filtering)
+### Clock synchronization notes
 
-To translate server-clock timelines into local system times, sendspin-cpp's time filter utilizes a NTP-style 4-timestamp exchange fed into a two-dimensional Kalman filter tracking **clock offset** and **drift**.
+The time filter translates server timestamps to local time. It uses four NTP-style timestamps and a two-dimensional Kalman filter for clock offset and drift.
 
-#### A. NTP Offset and Delay Calculations
+#### Offset and delay
 Each sync transaction exchanges four timestamps:
 - $T_1$: Client transmitted request time.
 - $T_2$: Server received request time.
@@ -111,23 +106,23 @@ $$\text{NTP Offset (Measurement)} = \frac{(T_1 - T_2) + (T_4 - T_3)}{2}$$
 
 $$\text{Max Error (Half RTT)} = \frac{(T_4 - T_1) - (T_3 - T_2)}{2}$$
 
-#### B. The State Vector
+#### Filter state
 The Kalman filter tracks the state vector $x_k = \begin{bmatrix} \theta_k & \delta_k \end{bmatrix}^T$ where:
 - $\theta_k$: Monotonic clock offset (Server Time - Client Time) in microseconds.
 - $\delta_k$: Monotonic clock drift (rate of change of offset, dimensionless in $\mu s/\mu s$).
 
-#### C. The Prediction Phase
+#### Prediction
 At step $k$ with elapsed microsecond time $dt = t_k - t_{k-1}$:
 
 $$\hat{x}_{k|k-1} = F x_{k-1|k-1} \implies \begin{bmatrix} \hat{\theta}_k \\ \hat{\delta}_k \end{bmatrix} = \begin{bmatrix} 1 & dt \\ 0 & 1 \end{bmatrix} \begin{bmatrix} \theta_{k-1} \\ \delta_{k-1} \end{bmatrix}$$
 
 $$P_{k|k-1} = F P_{k-1|k-1} F^T + Q$$
 
-where $P$ is the $2 \times 2$ covariance matrix, and $Q$ is the process noise covariance matrix updated proportionally to process variance $\sigma_w^2$ and drift variance $\sigma_d^2$:
+Here, $P$ is the $2 \times 2$ covariance matrix. The process noise matrix $Q$ depends on elapsed time, process variance $\sigma_w^2$, and drift variance $\sigma_d^2$:
 
 $$Q = \begin{bmatrix} dt \cdot \sigma_w^2 & 0 \\ 0 & dt \cdot \sigma_d^2 \end{bmatrix}$$
 
-#### D. The Correction Phase
+#### Correction
 Using NTP offset $z_k$ as measurement and measurement variance $R_k$ derived from delay max-error:
 
 $$\text{Residual (Innovation)} = y_k = z_k - H \hat{x}_{k|k-1} \implies y_k = z_k - \hat{\theta}_k$$
@@ -140,58 +135,53 @@ $$\text{Updated State} = x_{k|k} = \hat{x}_{k|k-1} + K_k y_k$$
 
 $$\text{Updated Covariance} = P_{k|k} = (I - K_k H) P_{k|k-1}$$
 
-#### E. Adaptive Forgetting
-If the residual $|y_k|$ exceeds $3 \times \text{max\_error}$ due to network congestion or GC pause:
-- Multiply $P$ covariance by a `forgetFactor` to let the filter quickly discard outdated predictions and converge on new network conditions.
+#### Adaptive forgetting
+When the residual $|y_k|$ exceeds $3 \times \text{max\_error}$, the filter increases covariance with a forgetting factor. This gives new measurements more weight.
 
----
+### Historical playout-offset model
 
-### 2. Playout Loop & Jitter Scheduling
+The following offset and deadline calculations describe the former Kotlin scheduler. The native scheduler uses playback feedback and sample corrections instead.
 
-Inside sendspin-cpp, the native sync task continuously pulls decoded frames from the audio ring buffer and calculates the exact local playback target time. Unlike the previous Kotlin implementation it does not nudge the `AudioTrack` sample rate; it inserts or drops silence to hold sync.
-
-#### Playout Offset Calculation
-To align speakers, the scheduler must compensate for three factors:
-- **Playout Offset**: Baseline delay ($\approx -50\text{ms}$) to account for Android's internal audio pipeline latency.
-- **Playout Offset Adjustment**: Per-device user-defined adjustment ($\pm 100\text{ms}$) to align mismatched hardware.
-- **Static Delay** ($static\_delay\_ms$): Spec-defined parameter compensating for external speaker/amplifier latency.
+#### Playout offset
+The historical model combines these offsets:
+- A baseline playout offset of approximately $-50\text{ms}$ for Android's pipeline latency.
+- A per-device adjustment of $\pm 100\text{ms}$.
+- Static delay, $static\_delay\_ms$, for external speaker or amplifier latency.
 
 $$\text{Total Playout Offset } (\mu s) = \text{PlayoutOffset} + \text{PlayoutOffsetAdjustment} - \text{StaticDelay}$$
 
 $$\text{Client Target Time } (T_{play}) = \text{convertServerToClient}(T_{server\_timestamp}) + \text{Total Playout Offset}$$
 
-#### Lateness Evaluation
+#### Lateness
 The scheduler computes the early playout offset $E$:
 
 $$E = T_{play} - t_{now}$$
 
-- If $E > \text{AudioTrack Latency}$: The thread delays (sleeps) for the difference to ensure precise playout timing.
-- If $E < \text{AudioTrack Latency}$: The frame is considered late. If $E$ falls beyond the late drop threshold, the frame is discarded to catch up to the live stream timeline.
+- If $E > \text{AudioTrack Latency}$, the thread waits for the difference.
+- If $E < \text{AudioTrack Latency}$, the frame is late. Frames beyond the late-drop threshold are discarded.
 
----
+### Historical speed control
 
-### 3. Proportional Speed Adjustment Math (historical)
+The former Kotlin client used `PlaybackSpeedController` to adjust playback speed. The native integration no longer uses that controller or the `playbackSpeedMultiplier` diagnostic.
 
-> The Kotlin client previously corrected drift by nudging the `AudioTrack` sample rate. This is **no longer used**: sendspin-cpp holds sync with silence insert/drop instead, so `PlaybackSpeedController` and the `playbackSpeedMultiplier` diagnostic were removed. The description below is retained for historical context.
+The controller changed AudioTrack's playback rate to correct drift.
 
-To correct tiny drifting errors without audible audio cuts, the former `PlaybackSpeedController` dynamically modified the native sample rate of Android's `AudioTrack`.
-
-1. **Calculate Smoothed Buffer Ahead**: Uses a short window Exponential Moving Average (EMA) to estimate current buffer-ahead depth $B_{ms}$.
-2. **Compute Error**: Target buffer depth is $80\text{ms}$. The error is:
+1. Estimate buffer-ahead depth $B_{ms}$ with an exponential moving average.
+2. Calculate error against the $80\text{ms}$ target:
 
 $$e_k = B_{ms} - \text{TargetBufferDepth}$$
 
-3. **Sample Rate Scaler**: The sample rate adjustment coefficient is proportionally governed by:
+3. Calculate the proportional rate adjustment:
 
 $$\text{Adjustment} = e_k \times K_p$$
 
-- If $e_k > 0$ (buffer is growing): Speed up playout slightly ($\max +1.5\%$).
-- If $e_k < 0$ (buffer is shrinking): Slow down playout slightly ($\min -1.5\%$).
-- **Deadband**: If $|e_k| < 5\text{ms}$, speed remains at a nominal $1.0\times$ to avoid constant jitter adjustments.
+- If $e_k > 0$, speed increases by up to $1.5\%$.
+- If $e_k < 0$, speed decreases by up to $1.5\%$.
+- If $|e_k| < 5\text{ms}$, speed stays at $1.0\times$.
 
----
+## Historical protocol flow
 
-## 📡 3. Communication Protocol Flow
+This diagram predates the current spec and the controller-role integration. See [Spec conformance](docs/SPEC_CONFORMANCE.md) for the checklist's review status.
 
 ```
 [Client]                                                          [Server]
@@ -221,44 +211,44 @@ $$\text{Adjustment} = e_k \times K_p$$
    ├─────── client/goodbye (reason: shutdown / another_server) ─────>│
 ```
 
----
+## Build and verification
 
-## 🛠️ 4. Developer's Guide & Verification
+### Toolchain
 
-### 1. Development Requirements
-- **Java Development Kit**: JDK 17 (recommended: OpenJDK 17).
-- **Android Target**: Android 12 (API 31) minimum, compiling with Android 14 SDK (API 34).
-- **Gradle Version**: $\ge 8.3$.
-- **Android NDK**: `27.0.12077973` (with 16 KB linker flags in CMake) and CMake `3.22.1` (installed via the SDK manager) to build the native `libsendspin_jni.so`.
-- **Submodules**: initialise before building, since the native client lives in the `sendspin-cpp` submodule:
+Use JDK 17, the repository's Gradle wrapper, NDK `27.0.12077973`, and CMake `3.22.1`. Check [app/build.gradle.kts](app/build.gradle.kts) for Android SDK versions. Earlier versions of this document listed API 31 and SDK 34, which no longer match the build.
+
+Initialize the submodules before building:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-### 2. Compilation and Build Commands
+### Build commands
 
-Run all commands using the persistent Java 17 path variable:
+These commands select JDK 17 explicitly. Adjust the path for your system:
 
 ```bash
-# Compile and check syntax correctness for Kotlin sources
+# Compile Kotlin sources
 ./gradlew compileDebugKotlin --no-configuration-cache -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk
 
-# Compile and check syntax correctness for Unit Tests
+# Compile unit tests
 ./gradlew compileDebugUnitTestKotlin --no-configuration-cache -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk
 
-# Assemble the final debug APK package
+# Build the debug APK
 ./gradlew assembleDebug --no-configuration-cache -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk
 ```
 
-### 3. Automated Test Verification
-Unit tests are written using standard JUnit and **Google Truth** assertion wrappers.
+### Unit tests
+
+Unit tests use JUnit and Google Truth.
 
 ```bash
-# Execute the complete test suite
+# Run the test suite
 ./gradlew test --no-configuration-cache -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk
 ```
 
-### 4. Telemetry and Diagnostics Flow
-- When `Sentry` crash reporting is enabled, unhandled exceptions and ANR errors are automatically uploaded.
-- To export a raw dump of local timing and playback jitter logs, the user can **tap the title "Sendspin Lite Player" on the main screen exactly 5 times**. This triggers a system-level save action to write the logs to an external text file.
+### Diagnostics
+
+When Sentry reporting is enabled, the app uploads unhandled exceptions and ANR reports. Use the bug-report icon to save an audio diagnostics report.
+
+An earlier version of this document described a five-tap log export from the app title. That instruction needs verification against the current UI.

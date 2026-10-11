@@ -134,7 +134,7 @@ object CrashReportingManager {
         val dir: File =
             when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
-                    // API 29+: app-specific external dir — no permission required, visible in file manager
+                    // API 29+ app-specific external storage needs no permission.
                     context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
                         ?: context.filesDir
                 }

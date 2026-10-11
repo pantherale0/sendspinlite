@@ -150,7 +150,6 @@
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"Audio capabilities: lowLatency=$hasLowLatency pro=$hasPro optimalFrames=$optimalFrames optimalRate=$optimalRate optimalBufferMs=$deviceOptimalBufferMs"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"AudioTrack buffer remained full after retries; dropping tail (${pcm.size - off} bytes)"</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$"Selected native warmup format sr=${format.sampleRate} ch=${format.channels} bd=${format.bitDepth}"</ID>
-    <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$// For now we won't do anything with this, but we can explore adjusting the 250ms HAL buffer based on the deviceOptimalBuffer</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$Log.i(tag, "AudioTrack started sr=$safeSampleRate ch=$channels bd=$bitDepth minBuf=$minBuf bufferBytes=$bufferBytes")</ID>
     <ID>MaxLineLength:PcmAudioOutput.kt$PcmAudioOutput$require(bitDepth in listOf(16, 24, 32)) { "Unsupported bit depth: $bitDepth. Must be 16, 24, or 32-bit PCM" }</ID>
     <ID>MaxLineLength:PlayerViewModel.kt$PlayerViewModel$MutableStateFlow(UiState(isLowMemoryDevice = checkIsLowMemoryDevice(), playerVolume = getSystemMediaVolume(), isTV = checkIsTV()))</ID>
